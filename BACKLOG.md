@@ -147,6 +147,46 @@ The next deep pass should be dedicated to these two themes, not features.
   `animalTags` field can stay in old docs; just stop reading/writing them, and
   drop the tag-icon summary from the collapsed row header too.
 
+## Feature ideas
+
+### Stat graphs on My Kills → "Kill Breakdown"
+
+User wants hunters to get a wall of personal stat graphs — "satisfy the ego."
+All the data is already in `myKillsData` (harvest docs: `species`, `harvestDate`,
+`weight`, `rackScore`, `antlerPoints`, `insideSpread`, `deerType`, `turkeySex`,
+`beardLength`, `spur*`, `bearColor`, `quantity`). Aggregate client-side and draw
+with **hand-rolled inline SVG / CSS bars** — no chart library (keeps the
+no-build-step setup; matches how the calendar/map were done). Theme with the
+existing CSS vars (`--gold`, `--orange`, `--text-*`).
+
+Charts to offer (start with 3–4, expand later):
+- **Species mix** — horizontal bar chart of the counts we already show as a list.
+- **Harvests by season/year** — vertical bars, one per year. Shows a career arc.
+- **Seasonality** — harvests by month (Sep–Jan mostly). "When do you fill tags?"
+- **Buck score trend** — line/dot of `rackScore` (or `antlerPoints`) by year, so
+  someone can watch their PB climb.
+- **Buck : doe ratio** — donut or split bar.
+- **Personal records card** — heaviest animal, highest B&C, most points in one
+  season, longest beard, etc. Pure ego candy.
+
+Ego / social layer (needs the "view other members" data that My Kills already
+loads, plus maybe a camp-wide aggregate):
+- **"Camp rank" chips** — "#2 at camp for bucks", "3rd most points this season".
+- **You vs camp average** — your bar next to the camp mean on each metric.
+- Optional: a camp-wide leaderboard view (heaviest buck ever, most kills, etc.)
+  — overlaps with the contests feature; keep them distinct (contests are
+  seasonal + opt-in, this is all-time + automatic).
+
+Implementation notes:
+- New collapsible sub-sections under Kill Breakdown, or a toggle between
+  "List" and "Charts" view.
+- Guard for tiny sample sizes — a "trend" with 1 harvest looks silly; show
+  "log a few more to see trends" under ~3 data points.
+- Make the SVG responsive (viewBox + `width:100%`), and give bars/points
+  `<title>` tooltips.
+- Reuse `speciesInfo()` for icons/labels; reuse `KILL_POINTS` for any
+  points math so it stays in sync.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
