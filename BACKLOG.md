@@ -3,6 +3,52 @@
 Known issues to address after the stress-test weekend (2026-08-29 sweep, v2.9.3).
 Revisit once we know which ones actually bite in real use.
 
+## Next full code sweep — focus: CONSISTENCY + APP SAFETY
+
+The next deep pass should be dedicated to these two themes, not features.
+
+### Safety (do first)
+
+- **Firestore security rules are wide open.** Current rule:
+  `allow read, write: if request.auth != null` on every document. That means any
+  signed-in member can read *and overwrite/delete* anything — every other
+  member's harvests, the whole feed, bulletins, guest keys, the admin log — and
+  can promote their own account to admin with a one-line
+  `updateDoc(doc(db,'users',myUid),{role:'admin'})`. Tighten to:
+  per-user write on own `users/{uid}` doc (but NOT the `role` field — admin
+  only), authors can edit/delete their own content, admins can do the rest,
+  reads scoped sensibly. Same for Storage (currently any auth write anywhere
+  under 25 MB).
+- **Password policy is weak** — `doChangePassword` only requires 6 characters.
+  Consider raising the minimum and/or enabling Firebase's built-in password
+  policy + email-enumeration protection.
+- **Guest access model** needs a look — guest "sessions" are pure client-side
+  `sessionStorage` with no Firebase auth, so a forged `role:'admin'` in
+  sessionStorage would show the admin UI (writes would fail at the rules layer,
+  but it's confusing and leaks the layout). Verify guests can actually read what
+  they're supposed to and nothing more.
+- **Compromised-password notification** (user reported one from their password
+  manager / browser, 2026-08-29): treat as a prompt to (a) rotate the affected
+  password and turn on 2FA for the Google/Firebase project account, (b) review
+  whether any member reused a breached password — Firebase stores only salted
+  hashes so the app didn't leak anything, but reuse is the risk. Not a code fix
+  per se; note it here so the next sweep double-checks auth config.
+
+### Consistency (do alongside)
+
+- Realtime-listener behaviour differs by screen: feed & harvest lists skip
+  re-render on `hasPendingWrites` and preserve scroll; trail cam feed, calendar,
+  and contests don't. Pick one pattern and apply everywhere.
+- Error handling is uneven: some `onSnapshot` / `updateDoc` failures show a
+  toast, some are silent `console.error`, some leave a spinner. Standardise.
+- Empty-vs-filtered states worded inconsistently ("No harvests logged yet" shows
+  even when it's just a filter miss; trail cam gets this right).
+- Modal / overlay patterns vary (some `appConfirm`, some hand-rolled overlays,
+  some `requireReason`). Not urgent but worth unifying.
+- Remove the trail cam animal-tag feature entirely for consistency — see
+  "UI changes to make" below (pills, `toggleTcTag`, AND the "🔍 Filter Photos"
+  tag filter all go).
+
 ## Post-stress-test fix list
 
 1. **Comment race / lost comments.**
@@ -57,11 +103,13 @@ Revisit once we know which ones actually bite in real use.
 - **Remove "Tag Animals in Photo" from the trail cam photo expansion / lightbox.**
   Not needed — a comment or a reaction emoji is enough on a trail cam photo.
   Remove the tag pill row (`renderTcTagPills` call in `renderTcLightboxBody`,
-  the `#tc-tag-list` block) and the `toggleTcTag` handler. Decide whether to
-  also drop the tag filter on the trail cam feed (`openTcFilterModal`,
-  `tcActiveAnimals`, the "🔍 Filter Photos" button) or keep filtering on
-  existing tags — probably remove it too for consistency. `TC_ANIMALS` and
-  `animalTags` can stay in old docs; just stop reading/writing them.
+  the `#tc-tag-list` block) and the `toggleTcTag` handler. **Also remove the
+  "🔍 Filter Photos" tag filter** on the trail cam feed (`openTcFilterModal`,
+  `closeTcFilterModal`, `toggleTcFilterPill`, `applyTcFilters`, `clearTcFilters`,
+  `tcActiveAnimals`, the filter bar in `renderTrailCamScreen`, and the filter
+  branch in `renderTcFeed`) — confirmed, for consistency. `TC_ANIMALS` and the
+  `animalTags` field can stay in old docs; just stop reading/writing them, and
+  drop the tag-icon summary from the collapsed row header too.
 
 ## Also noted (minor, no rush)
 
