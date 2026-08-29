@@ -1,0 +1,13 @@
+# Firebase local cache (regenerated automatically)
+.firebase/
+firebase-debug.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/

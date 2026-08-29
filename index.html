@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1409" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tucker's Camp" />
+  <title>Tucker's Camp Lite</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+
+<!-- ============================================================
+     LOGIN SCREEN
+     ============================================================ -->
+<div id="login-screen">
+  <img class="login-cabin" src="Images/cabinpicture.jpg" alt="Tucker's Camp" />
+  <h1 class="login-title">Tucker's Camp</h1>
+  <p class="login-subtitle">Members Only</p>
+
+  <!-- Tabs -->
+  <div class="login-tabs">
+    <button class="login-tab active" id="tab-email" onclick="switchLoginTab('email')">Sign In</button>
+    <button class="login-tab" id="tab-guest" onclick="switchLoginTab('guest')">Guest Key</button>
+  </div>
+
+  <!-- Email / Password Form -->
+  <form class="login-form" id="form-email" onsubmit="return false;">
+    <div class="input-group">
+      <label for="login-email">Email</label>
+      <input type="email" id="login-email" placeholder="you@email.com" autocomplete="email" />
+    </div>
+    <div class="input-group">
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary btn-full mt-12" onclick="doLogin()">Sign In</button>
+  </form>
+
+  <!-- Guest Key Form -->
+  <form class="login-form hidden" id="form-guest" onsubmit="return false;">
+    <div class="input-group">
+      <label for="guest-key">Guest Access Key</label>
+      <input type="text" id="guest-key" placeholder="Enter your key" autocapitalize="none" />
+    </div>
+    <button class="btn btn-primary btn-full mt-12" onclick="doGuestKeyLogin()">Enter as Guest</button>
+  </form>
+
+  <!-- Update check on login screen -->
+  <button class="btn btn-secondary btn-sm mt-16" onclick="checkForUpdate()" style="font-size:13px;min-width:200px">
+    ⟳ Check for Update
+  </button>
+</div>
+
+<!-- ============================================================
+     NAME SETUP MODAL
+     ============================================================ -->
+<div id="name-setup-modal" class="hidden">
+  <div class="name-setup-box">
+    <h2>Welcome to Tucker's Camp</h2>
+    <p>Set your display name and pick an avatar color before you head in.</p>
+    <div class="input-group">
+      <label for="setup-name">Display Name</label>
+      <input type="text" id="setup-name" placeholder="First Last or Nickname" maxlength="32" />
+    </div>
+    <div class="input-group mt-12">
+      <label>Initials</label>
+      <input type="text" id="setup-initials" placeholder="JD" maxlength="2" />
+    </div>
+    <div class="input-group mt-12">
+      <label>Avatar Color</label>
+      <div class="avatar-swatches" id="avatar-swatches"></div>
+    </div>
+    <button class="btn btn-primary btn-full mt-16" onclick="saveNameSetup()">Let's Go →</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     APP SHELL (hidden until logged in)
+     ============================================================ -->
+<div id="app" class="hidden">
+
+  <!-- Header -->
+  <header id="app-header">
+    <h1>Tucker's Camp</h1>
+    <div class="header-actions">
+      <span id="kill-counter-badge"
+        style="font-size:11px;color:var(--gold);font-weight:600;
+               letter-spacing:0.3px;white-space:nowrap"></span>
+      <button id="bell-btn" onclick="openNotifications()" title="Notifications">
+        🔔
+        <span id="bell-badge"></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main content area -->
+  <main id="main-content">
+
+    <!-- ── HOME SCREEN ─────────────────────────────────────── -->
+    <section class="screen active" id="screen-home">
+      <!-- Hero + weather — rendered by app.js -->
+      <div id="home-hero-wrap"></div>
+      <!-- Check-in button -->
+      <div id="home-checkin-wrap"></div>
+      <!-- News / Bulletins -->
+      <div id="home-bulletins-wrap"></div>
+      <!-- 2x2 Feature Grid -->
+      <div id="home-grid-wrap"></div>
+      <!-- Recent Harvests -->
+      <div id="home-harvests-wrap"></div>
+    </section>
+
+    <!-- ── MAP SCREEN ──────────────────────────────────────── -->
+    <section class="screen" id="screen-map">
+      <div class="back-bar">
+        <button class="back-btn" onclick="goHome()">← Back</button>
+      </div>
+      <div id="map-content"></div>
+    </section>
+
+    <!-- ── HARVEST LOG ─────────────────────────────────────── -->
+    <section class="screen" id="screen-harvest">
+      <div class="back-bar">
+        <button class="back-btn" onclick="goHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Harvest Log</span>
+      </div>
+      <div id="harvest-content"></div>
+    </section>
+
+    <!-- ── TRAIL CAM ───────────────────────────────────────── -->
+    <section class="screen" id="screen-trailcam">
+      <div class="back-bar">
+        <button class="back-btn" onclick="goHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Trail Cam</span>
+      </div>
+      <div id="trailcam-content"></div>
+    </section>
+
+    <!-- ── CABIN CALENDAR ─────────────────────────────────── -->
+    <section class="screen" id="screen-calendar">
+      <div class="back-bar">
+        <button class="back-btn" onclick="goHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Cabin Calendar</span>
+      </div>
+      <div id="calendar-content"></div>
+    </section>
+
+    <!-- ── SOCIAL FEED ─────────────────────────────────────── -->
+    <section class="screen" id="screen-feed">
+      <div class="back-bar">
+        <button class="back-btn" onclick="goHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Feed</span>
+      </div>
+      <div id="feed-content"></div>
+    </section>
+
+    <!-- ── BY-LAWS ─────────────────────────────────────────── -->
+    <section class="screen" id="screen-bylaws">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">By-Laws</span>
+      </div>
+      <div id="bylaws-content"></div>
+    </section>
+
+    <!-- ── CONTESTS ────────────────────────────────────────── -->
+    <section class="screen" id="screen-contests">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Contests</span>
+      </div>
+      <div id="contests-content"></div>
+    </section>
+
+    <!-- ── SETTINGS ────────────────────────────────────────── -->
+    <section class="screen" id="screen-settings">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Settings</span>
+      </div>
+      <div id="settings-content"></div>
+    </section>
+
+    <!-- ── ADMIN PANEL ─────────────────────────────────────────── -->
+    <section class="screen" id="screen-admin">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">⚡ Admin Panel</span>
+      </div>
+      <div id="admin-content"></div>
+    </section>
+
+    <!-- ── MY KILLS ──────────────────────────────────────────── -->
+    <section class="screen" id="screen-mykills">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">My Kills</span>
+      </div>
+      <div id="mykills-content"></div>
+    </section>
+
+    <!-- ── APP UPDATES ─────────────────────────────────────── -->
+    <section class="screen" id="screen-updates">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">App Updates</span>
+      </div>
+      <div id="updates-content"></div>
+    </section>
+
+    <!-- ── HARVEST DETAIL ─────────────────────────────────── -->
+    <section class="screen" id="screen-harvest-detail">
+      <div class="back-bar">
+        <button class="back-btn" onclick="showScreen('screen-harvest')">← Back</button>
+        <span class="section-title" style="margin-left:8px">Harvest Detail</span>
+      </div>
+      <div id="harvest-detail-content"></div>
+    </section>
+
+    <!-- ── HARVEST COMPARISON ─────────────────────────────── -->
+    <section class="screen" id="screen-harvest-compare">
+      <div class="back-bar">
+        <button class="back-btn" onclick="showScreen('screen-harvest-detail')">← Back</button>
+        <span class="section-title" style="margin-left:8px">Compare to Trail Cam</span>
+      </div>
+      <div id="harvest-compare-content"></div>
+    </section>
+
+    <!-- ── TRAIL CAM DETAIL ───────────────────────────────── -->
+    <section class="screen" id="screen-trailcam-detail">
+      <div class="back-bar">
+        <button class="back-btn" onclick="showScreen('screen-trailcam')">← Back</button>
+        <span class="section-title" style="margin-left:8px">Photo Detail</span>
+      </div>
+      <div id="trailcam-detail-content"></div>
+    </section>
+
+    <!-- ── NOTIFICATIONS PANEL ────────────────────────────── -->
+    <section class="screen" id="screen-notifications">
+      <div class="back-bar">
+        <button class="back-btn" onclick="goHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Notifications</span>
+      </div>
+      <div id="notifications-content"></div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav id="bottom-nav">
+    <button class="nav-btn active" id="nav-home" onclick="goHome()">
+      <span class="nav-icon">🏠</span>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" id="nav-map" onclick="goMap()">
+      <span class="nav-icon">📍</span>
+      <span>Map</span>
+    </button>
+    <button class="nav-btn" id="nav-more" onclick="openDrawer()">
+      <span class="nav-icon">☰</span>
+      <span>More</span>
+    </button>
+  </nav>
+
+  <!-- Floating Action Button (shown/hidden per screen) -->
+  <button class="fab hidden" id="fab-btn" onclick="fabAction()">+</button>
+
+</div><!-- /#app -->
+
+<!-- ============================================================
+     SLIDE-OUT DRAWER
+     ============================================================ -->
+<div id="drawer-overlay" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <div class="drawer-header">
+    <div class="drawer-title">Tucker's Camp</div>
+    <div class="drawer-user" id="drawer-user-name"></div>
+  </div>
+  <nav class="drawer-nav">
+    <button class="drawer-item" id="drawer-admin-btn" class="hidden" onclick="goTo('screen-admin')" style="display:none">
+      <span class="di-icon">⚡</span> Admin Panel
+    </button>
+    <button class="drawer-item" onclick="goTo('screen-mykills')">
+      <span class="di-icon">🎯</span> My Kills
+    </button>
+    <button class="drawer-item" onclick="goTo('screen-bylaws')">
+      <span class="di-icon">📜</span> By-Laws
+    </button>
+    <button class="drawer-item" onclick="goTo('screen-contests')">
+      <span class="di-icon">🏆</span> Contests
+    </button>
+    <button class="drawer-item" onclick="goTo('screen-settings')">
+      <span class="di-icon">⚙️</span> Settings
+    </button>
+    <button class="drawer-item" onclick="goTo('screen-updates')">
+      <span class="di-icon">📋</span> App Updates
+    </button>
+  </nav>
+  <div class="drawer-footer" style="display:flex;flex-direction:column;gap:8px">
+    <button class="btn btn-secondary btn-full" onclick="checkForUpdate()">⟳ Update App</button>
+    <button class="btn btn-danger btn-full" onclick="doLogout()">Sign Out</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     GLOBAL MODAL (appConfirm / appPrompt)
+     ============================================================ -->
+<div id="app-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-body" id="modal-body"></div>
+    <input type="text" id="modal-input" class="hidden" placeholder="" />
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Update banner -->
+<div id="update-banner" class="hidden">
+  <div style="font-size:28px">🔄</div>
+  <div>
+    <div style="font-family:var(--font-serif);font-size:17px;color:var(--gold);margin-bottom:4px">Update Available</div>
+    <div style="font-size:13px;color:var(--text-muted)">A new version of Tucker's Camp is ready.</div>
+  </div>
+  <button class="btn btn-primary btn-full" onclick="applyUpdate()">Update Now</button>
+  <button class="btn btn-ghost btn-sm" onclick="document.getElementById('update-banner').classList.add('hidden')" style="font-size:12px">Later</button>
+</div>
+
+<!-- ============================================================
+     SCRIPTS
+     ============================================================ -->
+<!-- Module ready shim — queues calls made before ES module loads -->
+<script>
+  (function() {
+    var _q = {};
+    function _defer(fn, args) {
+      if (typeof window[fn] === 'function') {
+        // If the module has already set the real function (not our stub), call it
+        var f = window[fn];
+        if (f._isStub) {
+          if (!_q[fn]) _q[fn] = [];
+          _q[fn].push(args);
+        } else {
+          f.apply(null, args);
+        }
+      } else {
+        if (!_q[fn]) _q[fn] = [];
+        _q[fn].push(args);
+      }
+    }
+
+    window._moduleReady = function() {
+      Object.keys(_q).forEach(function(fn) {
+        if (typeof window[fn] === 'function' && !window[fn]._isStub) {
+          _q[fn].forEach(function(a) { window[fn].apply(null, a); });
+        }
+        delete _q[fn];
+      });
+    };
+
+    var fns = [
+      'doLogin','doGuestKeyLogin','switchLoginTab','saveNameSetup','doLogout',
+      'checkForUpdate','applyUpdate','goHome','goMap','goHarvest','goTrailCam',
+      'goFeed','openDrawer','closeDrawer','openNotifications','fabAction','goTo',
+      'saveSettings','closeHarvestForm','saveHarvest','closeTcUpload','saveTcPhotos',
+      'tcHandleFileSelect','tcRemoveFile','doCheckin','openFeedCompose','submitFeedPost',
+      'closeDrawerAndGoHome','showScreen','toggleAdminSection','toggleSettingsSection',
+      'saveProfileSettings','saveNotifPrefs','openChangeEmail','doChangeEmail',
+      'openChangePassword','doChangePassword','sendResetEmail','clearAppCache',
+      'submitAdminAction','submitBulletin','submitGuestKey','toggleChangelog',
+      'toggleLogEntry','toggleMyKillRow','toggleMyKillsSection','updateHarvestFields',
+      'updateDeerFields','openPostBulletin','loadMoreFeed','toggleFeedComments',
+      'toggleHarvestRow','openAddHarvest','openEditHarvest','deleteHarvest',
+      'openAddTrailCam','toggleTcRow','openTcLightbox','closeTcLightbox',
+      'openTcFilterModal','applyTcFilters','clearTcFilters','toggleCompareFilter',
+      'openCompareDateFilter','applyCompareDateFilter','openCompareUserFilter',
+      'applyCompareUserFilter','openCompareTagFilter','applyCompareTagFilter',
+      'clearCompareFilters','toggleCompareFavorite','adminChangeRole',
+      'adminResetPassword','adminTogglePin','adminDeleteBulletin','adminToggleGuestKey',
+      'adminDeleteFeedPost','adminViewAllPosts','adminViewAllHarvests','adminViewAllTrailCam',
+      'toggleHarvestPhoto','filterHarvests','openHarvestCompare','addHarvestReaction',
+      'submitHarvestComment','addFeedReaction','submitFeedComment','deleteFeedPost',
+      'addTcReaction','submitTcComment','deleteTcPhoto','toggleTcTag',
+      'toggleTcFilterPill','closeTcFilterModal','toggleCompareTagPill',
+      'renderMyKillsScreen','renderAdminScreen','adminPostBulletin','adminCreateGuestKey',
+      'doCheckout','confirmCheckout','finishCheckout','goodChoice',
+      'forceUpdate','selectCmpUser','selectCmpPhoto','toggleCmpSection',
+      'openHarvestCompare','loadMoreFeed'
+    ];
+
+    fns.forEach(function(fn) {
+      var stub = function() { _defer(fn, Array.from(arguments)); };
+      stub._isStub = true;
+      window[fn] = stub;
+    });
+  })();
+</script>
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
