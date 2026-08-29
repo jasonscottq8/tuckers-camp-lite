@@ -86,7 +86,11 @@
 
   <!-- Header -->
   <header id="app-header">
-    <h1>Tucker's Camp</h1>
+    <div style="display:flex;align-items:baseline;gap:6px;min-width:0">
+      <h1>Tucker's Camp</h1>
+      <span id="app-version"
+        style="font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:0.3px;white-space:nowrap"></span>
+    </div>
     <div class="header-actions">
       <span id="kill-counter-badge"
         style="font-size:11px;color:var(--gold);font-weight:600;
@@ -396,7 +400,8 @@
       'goCalendar','renderCalendarScreen','calPrevMonth','calNextMonth','openMapFull',
       'openCalendarDay','openAddCalendarVisit','saveCalendarVisit','deleteCalendarVisit',
       'toggleHarvestReactPicker','switchKillsView','toggleMyKillRow',
-      'switchContestTab','openContestEntry','submitContestEntry','deleteContestEntry','toggleContestEntry'
+      'switchContestTab','openContestEntry','submitContestEntry','deleteContestEntry','toggleContestEntry',
+      'closeContest','reopenContest'
     ];
 
     fns.forEach(function(fn) {

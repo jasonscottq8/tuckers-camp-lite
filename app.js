@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.9.1";
+const APP_VERSION = "lite-2.9.2";
 
 
 
@@ -178,6 +178,9 @@ const AVATAR_COLORS = [
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
   buildAvatarSwatches();
+
+  const verEl = document.getElementById("app-version");
+  if (verEl) verEl.textContent = APP_VERSION.replace(/^lite-/, "v");
 
   onAuthStateChanged(auth, async (fbUser) => {
     if (fbUser) {
@@ -508,7 +511,7 @@ window.showScreen = function (screenId) {
     if (currentScreen === "screen-harvest"  && harvestListUnsub) { harvestListUnsub(); harvestListUnsub = null; }
     if (currentScreen === "screen-trailcam" && trailCamUnsub)    { trailCamUnsub();   trailCamUnsub   = null; }
     if (currentScreen === "screen-feed"     && feedUnsub)        { feedUnsub();       feedUnsub       = null; }
-    if (currentScreen === "screen-contests" && contestUnsub)     { contestUnsub();    contestUnsub    = null; }
+    if (currentScreen === "screen-contests") teardownContestListeners();
   }
 
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -1268,6 +1271,12 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.9.2", date: "Aug 2026", notes: [
+      "Fixed broken photos everywhere — harvest, trail cam, feed and contest pictures now display",
+      "Added a Bow Buck contest alongside Big Buck and Big Doe",
+      "Admins can end a contest season and crown the winner (and reopen it)",
+      "App version now shown next to the title in the header"
+    ]},
     { version: "lite-2.9.1", date: "Aug 2026", notes: [
       "Full-screen camp map now pans freely in every direction, with pinch / scroll / ± zoom",
       "Quick Access tiles are all the same size"
@@ -1436,25 +1445,29 @@ function renderBylawsScreen() {
 // auto-ranks by measurement; whoever is on top is the current leader.
 // ============================================================
 const CONTESTS = {
-  buck: { label: "Big Buck", icon: "🦌", unit: '"',   measureLabel: "Gross antler score (inches)",   ph: "e.g. 142.5" },
-  doe:  { label: "Big Doe",  icon: "🦌", unit: " lbs", measureLabel: "Field-dressed weight (lbs)",     ph: "e.g. 135" }
+  buck:    { label: "Big Buck", icon: "🦌", unit: '"',   measureLabel: "Gross antler score (inches)", ph: "e.g. 142.5", noun: "buck" },
+  doe:     { label: "Big Doe",  icon: "🦌", unit: " lbs", measureLabel: "Field-dressed weight (lbs)",  ph: "e.g. 135",   noun: "doe" },
+  bowbuck: { label: "Bow Buck", icon: "🏹", unit: '"',   measureLabel: "Gross antler score (inches)", ph: "e.g. 138",   noun: "buck" }
 };
-let contestTab       = "buck";
-let contestUnsub     = null;
-let contestEntries   = [];
-let contestExpanded  = new Set();
-let editingContestId = null;
+let contestTab        = "buck";
+let contestUnsub      = null;
+let contestMetaUnsub  = null;
+let contestEntries    = [];
+let contestMeta       = null;   // season doc for the active contest+year
+let contestExpanded   = new Set();
+let editingContestId  = null;
 
 function contestYear() { return new Date().getFullYear(); }
+function contestMetaId() { return contestTab + "_" + contestYear(); }
 
 function renderContestsScreen() {
   const el = document.getElementById("contests-content");
   if (!el) return;
   el.innerHTML = `
-    <div style="padding:12px 16px 6px;display:flex;gap:8px">
+    <div style="padding:12px 16px 6px;display:flex;gap:6px">
       ${Object.entries(CONTESTS).map(([id, c]) => `
         <button class="harvest-filter-btn ${contestTab === id ? "active" : ""}"
-          onclick="switchContestTab('${id}')" style="flex:1">${c.icon} ${c.label}</button>`).join("")}
+          onclick="switchContestTab('${id}')" style="flex:1;padding:6px 4px">${c.icon} ${c.label}</button>`).join("")}
     </div>
     <div style="padding:2px 16px 0;font-size:12px;color:var(--text-muted)">${contestYear()} Season</div>
     <div class="fade-divider-plain"></div>
@@ -1470,13 +1483,25 @@ window.switchContestTab = function (id) {
   if (!CONTESTS[id]) return;
   contestTab = id;
   contestExpanded.clear();
+  contestMeta = null;
   renderContestsScreen();
 };
 
+function teardownContestListeners() {
+  if (contestUnsub)     { contestUnsub();     contestUnsub     = null; }
+  if (contestMetaUnsub) { contestMetaUnsub(); contestMetaUnsub = null; }
+}
+
 function loadContestEntries() {
-  if (contestUnsub) { contestUnsub(); contestUnsub = null; }
+  teardownContestListeners();
   const board = document.getElementById("contest-board");
   if (!board) return;
+
+  contestMetaUnsub = onSnapshot(doc(db, "contestMeta", contestMetaId()), (snap) => {
+    contestMeta = snap.exists() ? snap.data() : null;
+    renderContestBoard();
+  }, () => {});
+
   const qy = query(collection(db, "contestEntries"), where("contest", "==", contestTab));
   contestUnsub = onSnapshot(qy, (snap) => {
     const yr = contestYear();
@@ -1494,8 +1519,10 @@ function loadContestEntries() {
 function renderContestBoard() {
   const board = document.getElementById("contest-board");
   if (!board) return;
-  const c = CONTESTS[contestTab];
-  const canEnter = userProfile && !userProfile.isGuest;
+  const c        = CONTESTS[contestTab];
+  const isAdmin  = userProfile && userProfile.role === "admin";
+  const isClosed = !!contestMeta?.closed;
+  const canEnter = userProfile && !userProfile.isGuest && !isClosed;
 
   const enterBtn = canEnter
     ? `<button class="btn btn-primary btn-full" onclick="openContestEntry()" style="margin-top:14px">
@@ -1503,20 +1530,50 @@ function renderContestBoard() {
        </button>`
     : "";
 
+  // Admin season control
+  const adminCtl = !isAdmin ? "" : (isClosed
+    ? `<button class="btn btn-secondary btn-full btn-sm" onclick="reopenContest()" style="margin-top:10px">
+         Reopen ${contestYear()} season
+       </button>`
+    : (contestEntries.length > 0
+        ? `<button class="btn btn-secondary btn-full btn-sm" onclick="closeContest()" style="margin-top:10px">
+             🏁 End ${contestYear()} season & crown the winner
+           </button>`
+        : ""));
+
+  // Closed banner with the crowned winner
+  const banner = (isClosed && contestMeta)
+    ? `<div style="background:linear-gradient(135deg,rgba(196,169,106,0.18),rgba(212,98,42,0.12));
+                   border:1px solid var(--gold-dim);border-radius:var(--radius-lg);
+                   padding:14px;margin-bottom:14px;text-align:center">
+         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">
+           ${contestYear()} ${esc(c.label)} — Season Closed
+         </div>
+         <div style="font-size:34px;margin:6px 0 2px">🏆</div>
+         <div style="font-size:16px;font-weight:700;color:var(--gold)">${esc(contestMeta.winnerName || "—")}</div>
+         ${contestMeta.winnerMeasure != null
+           ? `<div style="font-size:13px;color:var(--text-warm)">${esc((Number(contestMeta.winnerMeasure) || 0) + c.unit)}</div>` : ""}
+       </div>`
+    : "";
+
   if (contestEntries.length === 0) {
     board.innerHTML = `
+      ${banner}
       <div style="text-align:center;padding:40px 0 8px;color:var(--text-muted)">
         <div style="font-size:44px;margin-bottom:10px">🏆</div>
         <div style="font-size:14px">No entries yet for ${contestYear()}.</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:4px">Be the first on the board.</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:4px">
+          ${isClosed ? "This season is closed." : "Be the first on the board."}
+        </div>
       </div>
-      ${enterBtn}`;
+      ${enterBtn}${adminCtl}`;
     return;
   }
 
-  board.innerHTML = contestEntries.map((e, i) => {
+  const rows = contestEntries.map((e, i) => {
     const isExp   = contestExpanded.has(e.id);
-    const isOwner = userProfile && (userProfile.uid === e.uid || userProfile.role === "admin");
+    const isOwner = userProfile && (userProfile.uid === e.uid || isAdmin);
+    const canEdit = isOwner && !isClosed;
     const rank    = i + 1;
     const medal   = rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
     const measure = (Number(e.measure) || 0) + c.unit;
@@ -1538,20 +1595,66 @@ function renderContestBoard() {
         </button>
         ${isExp ? `
           <div class="harvest-detail-panel">
-            ${e.photoURL ? `<img src="${encodeURI(e.photoURL)}"
+            ${e.photoURL ? `<img src="${esc(e.photoURL)}"
               style="width:100%;border-radius:var(--radius-md);border:1px solid var(--card-border);
                      margin-bottom:10px;display:block" />` : ""}
             ${e.caption ? `<div style="font-size:13px;color:var(--text-muted);line-height:1.5;
-                                       white-space:pre-wrap;word-break:break-word;margin-bottom:${isOwner ? "10px" : "0"}">${esc(e.caption)}</div>` : ""}
-            ${isOwner ? `
+                                       white-space:pre-wrap;word-break:break-word;margin-bottom:${canEdit ? "10px" : "0"}">${esc(e.caption)}</div>` : ""}
+            ${canEdit ? `
               <div style="display:flex;gap:8px">
                 <button class="btn btn-secondary btn-sm" onclick="openContestEntry('${e.id}')">✏️ Edit</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteContestEntry('${e.id}')">🗑 Delete</button>
               </div>` : ""}
           </div>` : ""}
       </div>`;
-  }).join("") + enterBtn;
+  }).join("");
+
+  board.innerHTML = banner + rows + enterBtn + adminCtl;
 }
+
+window.closeContest = function () {
+  if (!userProfile || userProfile.role !== "admin") return;
+  const c = CONTESTS[contestTab];
+  const winner = contestEntries[0];
+  if (!winner) { showToast("No entries to crown yet.", "error"); return; }
+  appConfirm(
+    "End the Season",
+    `Close the ${contestYear()} ${c.label} contest? ${winner.memberName} takes it with ${(Number(winner.measure) || 0) + c.unit}. No new entries after this — you can reopen it later.`,
+    async () => {
+      try {
+        await setDoc(doc(db, "contestMeta", contestMetaId()), {
+          contest:        contestTab,
+          year:           contestYear(),
+          closed:         true,
+          closedAt:       serverTimestamp(),
+          closedByUid:    userProfile.uid,
+          closedByName:   userProfile.displayName,
+          winnerUid:      winner.uid || null,
+          winnerName:     winner.memberName || null,
+          winnerMeasure:  Number(winner.measure) || 0,
+          winnerPhotoURL: winner.photoURL || null
+        }, { merge: true });
+        await postAutoFeedEvent("contest", {
+          winnerName:   winner.memberName || "A member",
+          contestLabel: c.label,
+          year:         contestYear(),
+          measure:      (Number(winner.measure) || 0) + c.unit
+        });
+        showToast(`${c.label} season closed — 🏆 ${winner.memberName}`, "success");
+      } catch (err) { console.error(err); showToast("Could not close the season.", "error"); }
+    }
+  );
+};
+
+window.reopenContest = function () {
+  if (!userProfile || userProfile.role !== "admin") return;
+  appConfirm("Reopen Season", `Reopen the ${contestYear()} ${CONTESTS[contestTab].label} contest for entries?`, async () => {
+    try {
+      await setDoc(doc(db, "contestMeta", contestMetaId()), { closed: false }, { merge: true });
+      showToast("Season reopened.", "success");
+    } catch (err) { console.error(err); showToast("Could not reopen.", "error"); }
+  });
+};
 
 window.toggleContestEntry = function (id) {
   if (contestExpanded.has(id)) contestExpanded.delete(id);
@@ -1603,6 +1706,7 @@ window.openContestEntry = function (id) {
 
 window.submitContestEntry = async function () {
   if (!userProfile || userProfile.isGuest) return;
+  if (contestMeta?.closed) { showToast("This season is closed.", "error"); return; }
   const measure = parseFloat(document.getElementById("contest-measure")?.value);
   const caption = document.getElementById("contest-caption")?.value.trim() || "";
   const file    = document.getElementById("contest-photo")?.files?.[0] || null;
@@ -1610,7 +1714,7 @@ window.submitContestEntry = async function () {
   const existing = editingContestId ? contestEntries.find(x => x.id === editingContestId) : null;
 
   if (!(measure > 0)) { showToast("Enter a measurement.", "error"); return; }
-  if (!file && !existing?.photoURL) { showToast("Add a photo of your deer.", "error"); return; }
+  if (!file && !existing?.photoURL) { showToast(`Add a photo of your ${CONTESTS[contestTab].noun}.`, "error"); return; }
   if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
   try {
@@ -2245,7 +2349,7 @@ async function renderAdminLog(inner) {
                 ${log.photoUrl ? `
                   <div>
                     <div style="color:var(--text-dim);margin-bottom:4px">Preserved Photo:</div>
-                    <img src="${encodeURI(log.photoUrl || "")}" style="width:100%;border-radius:var(--radius-sm);max-height:160px;object-fit:cover" />
+                    <img src="${esc(log.photoUrl || "")}" style="width:100%;border-radius:var(--radius-sm);max-height:160px;object-fit:cover" />
                   </div>` : ""}
               </div>
             </div>
@@ -2317,7 +2421,7 @@ window.adminViewAllTrailCam = async function () {
         const tc = d.data();
         return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);
                             overflow:hidden;margin-bottom:8px">
-          <img src="${encodeURI(tc.photoURL || "")}" style="width:100%;height:120px;object-fit:cover;display:block" />
+          <img src="${esc(tc.photoURL || "")}" style="width:100%;height:120px;object-fit:cover;display:block" />
           <div style="padding:8px 10px;display:flex;align-items:center;justify-content:space-between">
             <div style="font-size:12px;color:var(--text-muted)">${esc(tc.uploaderName)} · ${formatDate(tc.capturedAt)}</div>
             <button class="btn btn-danger btn-sm"
@@ -2559,7 +2663,7 @@ function renderHarvestDetailInline(h) {
                    font-family:var(--font-sans);transition:filter 0.2s">
             ${shown ? "📷 Hide Photo" : "📷 Show Photo"}
           </button>
-          <img id="hphoto-${id}" src="${encodeURI(h.photoURL || "")}"
+          <img id="hphoto-${id}" src="${esc(h.photoURL || "")}"
             style="display:${shown ? "block" : "none"};width:100%;border-radius:var(--radius-md);
                    border:1px solid var(--card-border);margin-bottom:8px" />
           <button id="hphoto-compare-${id}" onclick="openHarvestCompare(\'${id}\')"
@@ -3430,7 +3534,7 @@ window.toggleTcRow = function (key) {
 function tcCard(tc) {
   const tags = (tc.animalTags||[]).map(t => TC_ANIMALS.find(x=>x.id===t)?.icon||"").join("");
   return `<div class="tc-card" onclick="openTcLightbox('${tc.id}')">
-    <img src="${encodeURI(tc.photoURL || "")}" style="width:150px;height:180px;object-fit:cover;display:block" />
+    <img src="${esc(tc.photoURL || "")}" style="width:150px;height:180px;object-fit:cover;display:block" />
     <div style="padding:7px 9px">
       <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
         <div class="avatar" style="background:${safeColor(tc.uploaderColor)};width:20px;height:20px;font-size:9px;flex-shrink:0">${esc(tc.uploaderInitials||"?")}</div>
@@ -3473,7 +3577,7 @@ function renderTcLightboxBody(tc) {
   const body = document.getElementById("tc-lb-body");
   if (!body) return;
   body.innerHTML = `
-    <img src="${encodeURI(tc.photoURL || "")}" style="width:100%;display:block;max-height:55vh;object-fit:contain;background:#000" />
+    <img src="${esc(tc.photoURL || "")}" style="width:100%;display:block;max-height:55vh;object-fit:contain;background:#000" />
     <div style="padding:14px 16px;background:rgba(8,10,4,0.98)">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <div class="avatar" style="background:${safeColor(tc.uploaderColor)};width:34px;height:34px;font-size:12px">${esc(tc.uploaderInitials||"?")}</div>
@@ -3715,7 +3819,7 @@ function renderCompareScreen(el) {
         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;
                     letter-spacing:0.5px;margin-bottom:8px">Your Harvest Photo</div>
         ${_cmpHarvestPhoto
-          ? `<img src="${encodeURI(_cmpHarvestPhoto)}"
+          ? `<img src="${esc(_cmpHarvestPhoto)}"
                style="width:100%;max-height:220px;object-fit:cover;
                       border-radius:var(--radius-lg);border:2px solid var(--gold-dim)" />`
           : `<div style="height:80px;display:flex;align-items:center;justify-content:center;
@@ -3874,7 +3978,7 @@ function renderCmpPhotoCarousel() {
                      border-radius:var(--radius-md);overflow:hidden;position:relative;
                      border:2px solid ${isSelected ? "var(--orange)" : "var(--card-border)"};
                      transition:border-color 0.15s">
-              <img src="${encodeURI(tc.photoURL || "")}"
+              <img src="${esc(tc.photoURL || "")}"
                 style="width:120px;height:120px;object-fit:cover;display:block" />
               ${tags ? `<div style="position:absolute;bottom:3px;left:4px;font-size:13px;
                                     text-shadow:0 1px 3px rgba(0,0,0,0.8)">${tags}</div>` : ""}
@@ -4844,7 +4948,8 @@ const AUTO_FEED_TYPES = {
   harvest:  (d) => `🦌 <strong>${esc(d.memberName)}</strong> just logged a ${esc(d.speciesIcon)} ${esc(d.speciesLabel)} harvest!`,
   trailcam: (d) => `📷 <strong>${esc(d.memberName)}</strong> uploaded ${Number(d.count) || 0} trail cam photo${d.count!==1?"s":""}!`,
   trending: (d) => `🔥 A trail cam photo is trending — check it out!`,
-  tier:     (d) => `🎉 Congrats to <strong>${esc(d.memberName)}</strong> for reaching ${esc(d.tierIcon)} <strong>${esc(d.tierName)}</strong> rank!`
+  tier:     (d) => `🎉 Congrats to <strong>${esc(d.memberName)}</strong> for reaching ${esc(d.tierIcon)} <strong>${esc(d.tierName)}</strong> rank!`,
+  contest:  (d) => `🏆 <strong>${esc(d.winnerName)}</strong> won the ${Number(d.year) || ""} ${esc(d.contestLabel)} contest with ${esc(d.measure)}!`
 };
 
 async function postAutoFeedEvent(type, data) {
@@ -5046,7 +5151,7 @@ function feedPostCard(post) {
       <div style="font-size:14px;color:var(--text-warm);line-height:1.55;margin-bottom:10px;white-space:pre-wrap;word-break:break-word">
         ${esc(post.text || "")}
       </div>
-      ${post.photoURL ? `<img src="${encodeURI(post.photoURL)}"
+      ${post.photoURL ? `<img src="${esc(post.photoURL)}"
         style="width:100%;border-radius:var(--radius-md);margin-bottom:10px;
                border:1px solid var(--card-border);display:block" />` : ""}
 
@@ -5481,7 +5586,7 @@ function renderMyKillRow(h, isOwn) {
           ${h.notes ? `<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;
                                    line-height:1.5;font-style:italic;white-space:pre-wrap;word-break:break-word">"${esc(h.notes)}"</div>` : ""}
           ${h.photoURL ? `
-            <img src="${encodeURI(h.photoURL)}"
+            <img src="${esc(h.photoURL)}"
               style="width:100%;border-radius:var(--radius-md);margin-bottom:12px;
                      border:1px solid var(--card-border);display:block;
                      max-height:200px;object-fit:cover" />` : ""}
