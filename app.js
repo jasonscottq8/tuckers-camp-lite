@@ -134,6 +134,23 @@ const appPrompt = window.appPrompt;
 
 
 // ============================================================
+// SAFE HTML HELPERS
+// Every piece of user-entered text (names, comments, notes, captions,
+// bulletins…) must be run through esc() before it goes into innerHTML.
+// ============================================================
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// Validate a stored avatar/hex color before dropping it into a style attribute.
+function safeColor(c) {
+  return /^#[0-9a-fA-F]{3,8}$/.test(String(c || "")) ? String(c) : "#556B2F";
+}
+
+
+// ============================================================
 // STATE
 // ============================================================
 let currentUser   = null;   // Firebase auth user
@@ -369,6 +386,11 @@ async function loadUserProfile(uid) {
       isGuest:     false
     };
 
+    // Backfill the member's email so admins can send password resets.
+    if (!data.email && auth.currentUser?.email) {
+      setDoc(ref, { email: auth.currentUser.email }, { merge: true }).catch(() => {});
+    }
+
     enterApp();
   } catch (err) {
     console.error("Profile load error:", err);
@@ -426,6 +448,7 @@ window.saveNameSetup = async function () {
       initials:     finalInitials,
       color:        color,
       role:         "user",
+      email:        auth.currentUser?.email || null,
       createdAt:    serverTimestamp(),
       updatedAt:    serverTimestamp()
     }, { merge: true });
@@ -671,9 +694,9 @@ async function loadHomeBulletins() {
             : docs.slice(0, 3).map(b => `
                 <div class="bulletin-item">
                   ${b.pinned ? `<span style="color:var(--gold);font-size:11px;margin-right:4px">📌</span>` : ""}
-                  <span style="color:var(--text-warm)">${b.text}</span>
+                  <span style="color:var(--text-warm)">${esc(b.text)}</span>
                   <div style="font-size:11px;color:var(--text-dim);margin-top:3px">
-                    ${b.authorName || "Admin"} · ${formatDate(b.createdAt)}
+                    ${esc(b.authorName || "Admin")} · ${formatDate(b.createdAt)}
                   </div>
                 </div>`).join("")}
         </div>
@@ -765,13 +788,13 @@ function renderSettingsScreen() {
 
       <!-- Avatar card -->
       <div class="card card-highlight" style="display:flex;align-items:center;gap:14px;padding:16px">
-        <div class="avatar" style="background:${userProfile.color};width:52px;height:52px;font-size:18px">
-          ${userProfile.initials}
+        <div class="avatar" style="background:${safeColor(userProfile.color)};width:52px;height:52px;font-size:18px">
+          ${esc(userProfile.initials)}
         </div>
         <div>
-          <div style="font-weight:700;font-size:16px">${userProfile.displayName}</div>
+          <div style="font-weight:700;font-size:16px">${esc(userProfile.displayName)}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px;text-transform:uppercase;letter-spacing:0.5px">
-            ${userProfile.role || "member"}
+            ${esc(userProfile.role || "member")}
           </div>
         </div>
       </div>
@@ -823,11 +846,11 @@ function renderSettingsSection(id) {
       inner.innerHTML = `
         <div class="input-group" style="margin-bottom:12px">
           <label>Display Name</label>
-          <input type="text" id="s-name" value="${userProfile.displayName}" maxlength="32" />
+          <input type="text" id="s-name" value="${esc(userProfile.displayName)}" maxlength="32" />
         </div>
         <div class="input-group" style="margin-bottom:12px">
           <label>Initials</label>
-          <input type="text" id="s-initials" value="${userProfile.initials}" maxlength="2" />
+          <input type="text" id="s-initials" value="${esc(userProfile.initials)}" maxlength="2" />
         </div>
         <div class="input-group" style="margin-bottom:16px">
           <label>Avatar Color</label>
@@ -1253,8 +1276,8 @@ function requireReason(title, description, onConfirm, hasPhoto, contentSnapshot,
   ov.className = "modal-overlay"; ov.id = "admin-reason-overlay";
   ov.innerHTML = `
     <div class="modal-box" style="max-width:360px">
-      <div class="modal-title" style="color:var(--danger)">⚠️ ${title}</div>
-      <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">${description}</div>
+      <div class="modal-title" style="color:var(--danger)">⚠️ ${esc(title)}</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">${esc(description)}</div>
       <div class="input-group" style="margin-bottom:${hasPhoto ? "12px" : "16px"}">
         <label>Reason (required)</label>
         <textarea id="admin-reason-input" placeholder="Why are you taking this action?"
@@ -1373,18 +1396,20 @@ async function loadAdminSection(id) {
 async function renderAdminUsers(inner) {
   const snap = await getDocs(collection(db, "users"));
   const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  _adminDocCache = {};
+  users.forEach(u => { _adminDocCache[u.id] = u; });
   inner.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:8px">
       ${users.map(u => `
         <div style="background:rgba(255,255,255,0.04);border:1px solid var(--card-border);
                     border-radius:var(--radius-md);padding:12px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-            <div class="avatar" style="background:${u.color||"#556B2F"};width:34px;height:34px;font-size:12px">
-              ${u.initials||"?"}
+            <div class="avatar" style="background:${safeColor(u.color)};width:34px;height:34px;font-size:12px">
+              ${esc(u.initials||"?")}
             </div>
             <div style="flex:1">
-              <div style="font-size:14px;font-weight:600">${u.displayName||"Unknown"}</div>
-              <div style="font-size:11px;color:var(--text-muted)">${u.role||"user"} · ${u.id.slice(0,8)}…</div>
+              <div style="font-size:14px;font-weight:600">${esc(u.displayName||"Unknown")}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${esc(u.role||"user")} · ${esc(u.id.slice(0,8))}…</div>
             </div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1395,10 +1420,10 @@ async function renderAdminUsers(inner) {
               <option value="admin" ${u.role==="admin"?"selected":""}>Admin</option>
               <option value="guest" ${u.role==="guest"?"selected":""}>Guest</option>
             </select>
-            <button class="btn btn-secondary btn-sm" onclick="adminChangeRole('${u.id}','${u.displayName||"User"}')">
+            <button class="btn btn-secondary btn-sm" onclick="adminChangeRole('${u.id}')">
               Save Role
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="adminResetPassword('${u.id}','${u.displayName||"User"}')">
+            <button class="btn btn-secondary btn-sm" onclick="adminResetPassword('${u.id}')">
               📧 Reset PW
             </button>
           </div>
@@ -1407,6 +1432,7 @@ async function renderAdminUsers(inner) {
 }
 
 window.adminChangeRole = function (uid, name) {
+  name = name || (_adminDocCache[uid] || {}).displayName || "User";
   const newRole = document.getElementById("role-" + uid)?.value;
   requireReason(
     "Change User Role",
@@ -1421,14 +1447,18 @@ window.adminChangeRole = function (uid, name) {
 };
 
 window.adminResetPassword = function (uid, name) {
+  name = name || (_adminDocCache[uid] || {}).displayName || "User";
   requireReason(
     "Reset Password",
     `Send a password reset email to ${name}?`,
     async (reason) => {
-      // Get their email from auth — we can only send to their registered email
+      // Get their email from their user doc (saved at sign-up / login).
       const snap = await getDoc(doc(db, "users", uid));
       const email = snap.data()?.email || null;
-      if (!email) { showToast("No email found for this user.", "error"); return; }
+      if (!email) {
+        showToast("No email on file for this member yet — they need to open the app once so it can be recorded.", "error");
+        return;
+      }
       await sendPasswordResetEmail(auth, email);
       await writeAdminLog("password_reset", { uid, name }, `Reset email sent`, reason, null);
       showToast(`Password reset email sent to ${name}.`, "success");
@@ -1474,10 +1504,10 @@ window.adminViewAllPosts = async function () {
         return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);
                             padding:10px;margin-bottom:8px">
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:5px">
-            ${p.memberName||"Auto"} · ${formatDate(p.createdAt)}
+            ${esc(p.memberName||"Auto")} · ${formatDate(p.createdAt)}
           </div>
           <div style="font-size:13px;color:var(--text-warm);margin-bottom:8px">
-            ${p.text||"[auto event]"}
+            ${esc(p.text||"[auto event]")}
           </div>
           <button class="btn btn-danger btn-sm" onclick="adminDeleteFeedPost('${d.id}')">
             🗑 Delete
@@ -1571,9 +1601,9 @@ async function renderAdminBulletins(inner) {
           const b = d.data();
           return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);padding:10px">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">
-              ${b.pinned ? "📌 PINNED · " : ""}${b.authorName||"Admin"} · ${formatDate(b.createdAt)}
+              ${b.pinned ? "📌 PINNED · " : ""}${esc(b.authorName||"Admin")} · ${formatDate(b.createdAt)}
             </div>
-            <div style="font-size:13px;color:var(--text-warm);margin-bottom:8px">${b.text||""}</div>
+            <div style="font-size:13px;color:var(--text-warm);margin-bottom:8px">${esc(b.text||"")}</div>
             <div style="display:flex;gap:6px">
               <button class="btn btn-secondary btn-sm" onclick="adminTogglePin('${d.id}',${!!b.pinned})">
                 ${b.pinned ? "📌 Unpin" : "📌 Pin"}
@@ -1650,6 +1680,8 @@ window.adminDeleteBulletin = function (id, text) {
 
 async function renderAdminGuestKeys(inner) {
   const snap = await getDocs(collection(db, "guestKeys"));
+  _adminDocCache = {};
+  snap.docs.forEach(d => { _adminDocCache[d.id] = { id: d.id, ...d.data() }; });
   inner.innerHTML = `
     <div style="margin-bottom:12px">
       <button class="btn btn-primary btn-full" onclick="adminCreateGuestKey()">
@@ -1663,11 +1695,11 @@ async function renderAdminGuestKeys(inner) {
           return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);padding:10px">
             <div style="display:flex;align-items:center;justify-content:space-between">
               <div>
-                <div style="font-size:14px;font-weight:600;color:var(--text-warm);font-family:monospace">${k.key}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${k.label||"Guest"} · ${k.active?"Active":"Inactive"}</div>
+                <div style="font-size:14px;font-weight:600;color:var(--text-warm);font-family:monospace">${esc(k.key)}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${esc(k.label||"Guest")} · ${k.active?"Active":"Inactive"}</div>
               </div>
               <button class="btn ${k.active?"btn-danger":"btn-secondary"} btn-sm"
-                onclick="adminToggleGuestKey('${d.id}','${k.key}',${!!k.active})">
+                onclick="adminToggleGuestKey('${d.id}',null,${!!k.active})">
                 ${k.active ? "Deactivate" : "Activate"}
               </button>
             </div>
@@ -1711,6 +1743,7 @@ window.submitGuestKey = async function () {
 };
 
 window.adminToggleGuestKey = function (id, key, isActive) {
+  key = key || (_adminDocCache[id] || {}).key || "";
   if (isActive) {
     requireReason(
       "Deactivate Guest Key",
@@ -1776,7 +1809,7 @@ async function renderAdminLog(inner) {
     <div style="display:flex;flex-direction:column;gap:8px">
       ${snap.docs.map((d,i) => {
         const log = d.data();
-        const label = ACTION_LABELS[log.action] || log.action;
+        const label = ACTION_LABELS[log.action] || esc(log.action);
         return `
           <div>
             <button class="tc-row-header" id="log-toggle-${i}"
@@ -1784,7 +1817,7 @@ async function renderAdminLog(inner) {
               <div style="flex:1;text-align:left;min-width:0">
                 <div style="font-size:13px;font-weight:600;color:var(--text-warm)">${label}</div>
                 <div style="font-size:11px;color:var(--text-muted)">
-                  ${log.adminName} · ${formatDate(log.timestamp)}
+                  ${esc(log.adminName)} · ${formatDate(log.timestamp)}
                 </div>
               </div>
               <span id="log-arrow-${i}" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
@@ -1794,13 +1827,13 @@ async function renderAdminLog(inner) {
                      border-top:none;border-bottom-left-radius:var(--radius-lg);
                      border-bottom-right-radius:var(--radius-lg);padding:12px;margin-bottom:4px">
               <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-muted)">
-                ${log.targetName ? `<div><span style="color:var(--text-dim)">Target:</span> ${log.targetName}</div>` : ""}
-                ${log.contentSnapshot ? `<div><span style="color:var(--text-dim)">Content:</span> ${log.contentSnapshot}</div>` : ""}
-                <div><span style="color:var(--text-dim)">Reason:</span> <span style="color:var(--text-warm)">${log.reason}</span></div>
+                ${log.targetName ? `<div><span style="color:var(--text-dim)">Target:</span> ${esc(log.targetName)}</div>` : ""}
+                ${log.contentSnapshot ? `<div><span style="color:var(--text-dim)">Content:</span> ${esc(log.contentSnapshot)}</div>` : ""}
+                <div><span style="color:var(--text-dim)">Reason:</span> <span style="color:var(--text-warm)">${esc(log.reason)}</span></div>
                 ${log.photoUrl ? `
                   <div>
                     <div style="color:var(--text-dim);margin-bottom:4px">Preserved Photo:</div>
-                    <img src="${log.photoUrl}" style="width:100%;border-radius:var(--radius-sm);max-height:160px;object-fit:cover" />
+                    <img src="${encodeURI(log.photoUrl || "")}" style="width:100%;border-radius:var(--radius-sm);max-height:160px;object-fit:cover" />
                   </div>` : ""}
               </div>
             </div>
@@ -1843,7 +1876,7 @@ async function renderAdminViewAllHarvests() {
         return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);
                             padding:10px;margin-bottom:8px">
           <div style="font-size:13px;color:var(--text-warm);margin-bottom:6px">
-            ${sp.icon} ${sp.label} · ${h.memberName} · ${formatDate(h.harvestDate)}
+            ${sp.icon} ${sp.label} · ${esc(h.memberName)} · ${formatDate(h.harvestDate)}
           </div>
           <button class="btn btn-danger btn-sm"
             onclick="adminDeleteHarvest('${d.id}')">
@@ -1872,9 +1905,9 @@ window.adminViewAllTrailCam = async function () {
         const tc = d.data();
         return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);
                             overflow:hidden;margin-bottom:8px">
-          <img src="${tc.photoURL}" style="width:100%;height:120px;object-fit:cover;display:block" />
+          <img src="${encodeURI(tc.photoURL || "")}" style="width:100%;height:120px;object-fit:cover;display:block" />
           <div style="padding:8px 10px;display:flex;align-items:center;justify-content:space-between">
-            <div style="font-size:12px;color:var(--text-muted)">${tc.uploaderName} · ${formatDate(tc.capturedAt)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${esc(tc.uploaderName)} · ${formatDate(tc.capturedAt)}</div>
             <button class="btn btn-danger btn-sm"
               onclick="adminDeleteTcPhoto('${d.id}')">
               🗑
@@ -1907,6 +1940,7 @@ let harvestDetailData = null;
 let harvestPhotoFile  = null;
 let editingHarvestId  = null;
 let expandedHarvests  = new Set();
+let harvestPhotosShown = new Set();  // harvest ids whose photo is toggled open
 let lastHarvestSnap   = null;
 
 function speciesInfo(id) {
@@ -1995,7 +2029,14 @@ function loadHarvestList(speciesFilter) {
 
   harvestListUnsub = onSnapshot(q, (snap) => {
     lastHarvestSnap = snap;
-    renderHarvestList(snap, speciesFilter);
+    // Skip the rebuild for our own optimistic writes (reactions/comments already
+    // update in place); wait for the confirmed server snapshot.
+    if (snap.metadata.hasPendingWrites) return;
+    const scroller = document.getElementById("main-content");
+    const keepScroll = scroller ? scroller.scrollTop : 0;
+    const activeFilter = document.querySelector(".harvest-filter-btn.active")?.dataset?.species || speciesFilter;
+    renderHarvestList(snap, activeFilter);
+    if (scroller) scroller.scrollTop = keepScroll;
     refreshHomeHarvests(snap.docs.slice(0, 3));
   }, err => {
     console.error(err);
@@ -2034,16 +2075,16 @@ function renderHarvestList(snap, speciesFilter) {
       <div style="margin-bottom:${isExp ? "0" : "10px"}">
         <button class="harvest-row-header ${isExp ? "expanded" : ""}"
           onclick="toggleHarvestRow(\'${h.id}\')">
-          <div class="avatar" style="background:${h.uploaderColor || "#556B2F"};
+          <div class="avatar" style="background:${safeColor(h.uploaderColor)};
                width:34px;height:34px;font-size:12px;flex-shrink:0">
-            ${h.uploaderInitials || h.memberName?.slice(0,2).toUpperCase() || "??"}
+            ${esc(h.uploaderInitials || h.memberName?.slice(0,2).toUpperCase() || "??")}
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:14px;font-weight:600;color:var(--text-warm)">
               ${sp.icon} ${sp.label}
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-              ${h.memberName || "Unknown"} · ${dateStr}${weight}${score}
+              ${esc(h.memberName || "Unknown")} · ${dateStr}${weight}${score}
             </div>
           </div>
           <span style="color:var(--gold);font-size:18px;flex-shrink:0;transition:transform 0.2s;
@@ -2093,30 +2134,30 @@ function renderHarvestDetailInline(h) {
           ${h.weight    ? detailStat("⚖️ Weight",    h.weight + " lbs") : ""}
           ${h.rackScore ? detailStat("🏆 B&C Score", h.rackScore + '"') : ""}
         </div>
-        ${h.notes ? `<div style="font-size:13px;color:var(--text-muted);line-height:1.5">${h.notes}</div>` : ""}
+        ${h.notes ? `<div style="font-size:13px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(h.notes)}</div>` : ""}
       ` : ""}
 
       <!-- Photo — red button, compare appears when photo is open -->
-      ${h.photoURL ? `
+      ${h.photoURL ? (() => { const shown = harvestPhotosShown.has(id); return `
         <div>
           <button onclick="toggleHarvestPhoto(\'${id}\')" id="hphoto-toggle-${id}"
             style="width:100%;padding:10px;border:none;border-radius:var(--radius-md);
                    background:linear-gradient(135deg,#a01020,#c01830);color:#fff;
                    font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px;
                    font-family:var(--font-sans);transition:filter 0.2s">
-            📷 Show Photo
+            ${shown ? "📷 Hide Photo" : "📷 Show Photo"}
           </button>
-          <img id="hphoto-${id}" src="${h.photoURL}"
-            style="display:none;width:100%;border-radius:var(--radius-md);
+          <img id="hphoto-${id}" src="${encodeURI(h.photoURL || "")}"
+            style="display:${shown ? "block" : "none"};width:100%;border-radius:var(--radius-md);
                    border:1px solid var(--card-border);margin-bottom:8px" />
           <button id="hphoto-compare-${id}" onclick="openHarvestCompare(\'${id}\')"
-            style="display:none;width:100%;padding:9px;border:1px solid var(--card-border);
+            style="display:${shown ? "block" : "none"};width:100%;padding:9px;border:1px solid var(--card-border);
                    border-radius:var(--radius-md);background:rgba(255,255,255,0.06);
                    color:var(--text-warm);font-size:13px;font-weight:600;cursor:pointer;
                    font-family:var(--font-sans);transition:all 0.2s">
             Compare to TrailCam Picture
           </button>
-        </div>` : ""}
+        </div>`; })() : ""}
 
       <!-- Reactions compact -->
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
@@ -2183,6 +2224,8 @@ window.toggleHarvestPhoto = function (id) {
   img.style.display = isHidden ? "block" : "none";
   if (btn)     btn.textContent  = isHidden ? "📷 Hide Photo" : "📷 Show Photo";
   if (compare) compare.style.display = isHidden ? "block" : "none";
+  if (isHidden) harvestPhotosShown.add(id);
+  else harvestPhotosShown.delete(id);
 };
 
 // ── Filter ───────────────────────────────────────────────────
@@ -2217,7 +2260,7 @@ function refreshHomeHarvests(docs) {
         <span style="font-size:24px">${sp.icon}</span>
         <div style="flex:1">
           <div style="font-size:14px;font-weight:600">${sp.label}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${h.memberName || "Unknown"} · ${dateStr}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${esc(h.memberName || "Unknown")} · ${dateStr}</div>
         </div>
         <span style="color:var(--text-dim)">›</span>
       </button>
@@ -2296,7 +2339,8 @@ function renderReactionBadges(reactions, docId, collName) {
   if (!reactions || Object.keys(reactions).length === 0)
     return `<span style="color:var(--text-dim);font-size:13px">No reactions yet</span>`;
   return Object.entries(reactions).map(([emoji, users]) => {
-    const count      = Object.keys(users).length;
+    if (!REACTIONS_LIST.includes(emoji)) return "";   // ignore unexpected keys
+    const count      = Object.keys(users || {}).length;
     if (count === 0) return "";
     const hasReacted = userProfile && users[userProfile.uid];
     return `<button onclick="addReaction(\'${docId}\',\'${collName}\',\'${emoji}\')"
@@ -2317,14 +2361,14 @@ function renderComments(comments, docId, collName) {
     const isAuthor = userProfile && (userProfile.uid === c.uid || userProfile.role === "admin");
     return `
       <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(196,169,106,0.07)">
-        <div class="avatar" style="background:${c.color || "#556B2F"};width:30px;height:30px;
-             font-size:11px;flex-shrink:0">${c.initials || "?"}</div>
+        <div class="avatar" style="background:${safeColor(c.color)};width:30px;height:30px;
+             font-size:11px;flex-shrink:0">${esc(c.initials || "?")}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
-            <span style="font-size:13px;font-weight:600">${c.name || "Member"}</span>
+            <span style="font-size:13px;font-weight:600">${esc(c.name || "Member")}</span>
             <span style="font-size:11px;color:var(--text-dim)">${c.createdAt ? formatDate({ toDate:()=>new Date(c.createdAt) }) : ""}</span>
           </div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.4">${c.text}</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.4;white-space:pre-wrap;word-break:break-word">${esc(c.text)}</div>
           ${isAuthor ? `
             <div style="display:flex;gap:8px;margin-top:5px">
               <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px"
@@ -2403,7 +2447,7 @@ function showHarvestForm(data) {
       </div>
       <div class="input-group" style="margin-bottom:12px">
         <label>Notes</label>
-        <textarea id="hf-notes" placeholder="Any details…">${d.notes||""}</textarea>
+        <textarea id="hf-notes" placeholder="Any details…">${esc(d.notes||"")}</textarea>
       </div>
       <div class="input-group" style="margin-bottom:16px">
         <label>Photo (optional)</label>
@@ -2950,9 +2994,9 @@ function renderTcFeed(snap) {
     const tagPills = tagArr.length > 0 ? `<span style="font-size:12px;color:var(--text-muted)">${tagIcons}${tagExtra}</span>` : "";
     return `<div style="margin-bottom:${isExp?"0":"10px"}">
       <button class="tc-row-header ${isExp?"expanded":""}" onclick="toggleTcRow('${key}')">
-        <div class="avatar" style="background:${group.color};width:34px;height:34px;font-size:12px;flex-shrink:0">${group.initials}</div>
+        <div class="avatar" style="background:${safeColor(group.color)};width:34px;height:34px;font-size:12px;flex-shrink:0">${esc(group.initials)}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${group.label}</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(group.label)}</div>
           <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap">
             <span style="font-size:11px;color:var(--text-dim)">${group.photos.length} photo${group.photos.length!==1?"s":""}</span>
             ${tagPills}
@@ -2974,14 +3018,14 @@ window.toggleTcRow = function (key) {
 function tcCard(tc) {
   const tags = (tc.animalTags||[]).map(t => TC_ANIMALS.find(x=>x.id===t)?.icon||"").join("");
   return `<div class="tc-card" onclick="openTcLightbox('${tc.id}')">
-    <img src="${tc.photoURL}" style="width:150px;height:180px;object-fit:cover;display:block" />
+    <img src="${encodeURI(tc.photoURL || "")}" style="width:150px;height:180px;object-fit:cover;display:block" />
     <div style="padding:7px 9px">
       <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
-        <div class="avatar" style="background:${tc.uploaderColor||"#556B2F"};width:20px;height:20px;font-size:9px;flex-shrink:0">${tc.uploaderInitials||"?"}</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1">${tc.uploaderName||"Unknown"}</div>
+        <div class="avatar" style="background:${safeColor(tc.uploaderColor)};width:20px;height:20px;font-size:9px;flex-shrink:0">${esc(tc.uploaderInitials||"?")}</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1">${esc(tc.uploaderName||"Unknown")}</div>
       </div>
       ${tags?`<div style="font-size:13px;margin-top:2px">${tags}</div>`:""}
-      ${tc.caption?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${tc.caption}</div>`:""}
+      ${tc.caption?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(tc.caption)}</div>`:""}
     </div>
   </div>`;
 }
@@ -3017,13 +3061,13 @@ function renderTcLightboxBody(tc) {
   const body = document.getElementById("tc-lb-body");
   if (!body) return;
   body.innerHTML = `
-    <img src="${tc.photoURL}" style="width:100%;display:block;max-height:55vh;object-fit:contain;background:#000" />
+    <img src="${encodeURI(tc.photoURL || "")}" style="width:100%;display:block;max-height:55vh;object-fit:contain;background:#000" />
     <div style="padding:14px 16px;background:rgba(8,10,4,0.98)">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <div class="avatar" style="background:${tc.uploaderColor||"#556B2F"};width:34px;height:34px;font-size:12px">${tc.uploaderInitials||"?"}</div>
-        <div><div style="font-weight:600;font-size:14px">${tc.uploaderName||"Unknown"}</div><div style="font-size:12px;color:var(--text-muted)">${dateStr}</div></div>
+        <div class="avatar" style="background:${safeColor(tc.uploaderColor)};width:34px;height:34px;font-size:12px">${esc(tc.uploaderInitials||"?")}</div>
+        <div><div style="font-weight:600;font-size:14px">${esc(tc.uploaderName||"Unknown")}</div><div style="font-size:12px;color:var(--text-muted)">${dateStr}</div></div>
       </div>
-      ${tc.caption?`<div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:12px">${tc.caption}</div>`:""}
+      ${tc.caption?`<div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:12px;white-space:pre-wrap;word-break:break-word">${esc(tc.caption)}</div>`:""}
       <div style="margin-bottom:14px">
         <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Tag Animals in Photo</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px" id="tc-tag-list">${renderTcTagPills(tags,id)}</div>
@@ -3259,7 +3303,7 @@ function renderCompareScreen(el) {
         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;
                     letter-spacing:0.5px;margin-bottom:8px">Your Harvest Photo</div>
         ${_cmpHarvestPhoto
-          ? `<img src="${_cmpHarvestPhoto}"
+          ? `<img src="${encodeURI(_cmpHarvestPhoto)}"
                style="width:100%;max-height:220px;object-fit:cover;
                       border-radius:var(--radius-lg);border:2px solid var(--gold-dim)" />`
           : `<div style="height:80px;display:flex;align-items:center;justify-content:center;
@@ -3289,7 +3333,7 @@ function renderCompareScreen(el) {
               Step 1 — Choose a Member's Camera
             </div>
             <div id="cmp-user-sub" style="font-size:12px;color:var(--text-muted)">
-              ${_cmpSelectedUser ? _cmpUsers[_cmpSelectedUser]?.name : "Tap to select"}
+              ${_cmpSelectedUser ? esc(_cmpUsers[_cmpSelectedUser]?.name) : "Tap to select"}
             </div>
           </div>
           <span id="cmp-user-arrow" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
@@ -3307,10 +3351,10 @@ function renderCompareScreen(el) {
                            background:${_cmpSelectedUser===u.uid ? "rgba(212,98,42,0.2)" : "rgba(255,255,255,0.04)"};
                            border:1px solid ${_cmpSelectedUser===u.uid ? "var(--orange)" : "var(--card-border)"};
                            border-radius:var(--radius-md);cursor:pointer;width:100%;text-align:left">
-                    <div class="avatar" style="background:${u.color};width:32px;height:32px;font-size:11px;flex-shrink:0">
-                      ${u.initials}
+                    <div class="avatar" style="background:${safeColor(u.color)};width:32px;height:32px;font-size:11px;flex-shrink:0">
+                      ${esc(u.initials)}
                     </div>
-                    <span style="font-size:14px;color:var(--text-warm);font-weight:600">${u.name}</span>
+                    <span style="font-size:14px;color:var(--text-warm);font-weight:600">${esc(u.name)}</span>
                     ${_cmpSelectedUser===u.uid ? `<span style="margin-left:auto;color:var(--orange);font-size:16px">✓</span>` : ""}
                   </button>`).join("")}
           </div>
@@ -3398,7 +3442,7 @@ function renderCmpPhotoCarousel() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
         <span style="font-size:14px">📂</span>
         <div>
-          <div style="font-size:13px;font-weight:600;color:var(--gold)">${album.label}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--gold)">${esc(album.label)}</div>
           <div style="font-size:11px;color:var(--text-muted)">${album.docs.length} photo${album.docs.length!==1?"s":""}</div>
         </div>
       </div>
@@ -3413,12 +3457,12 @@ function renderCmpPhotoCarousel() {
             return a ? a.icon : "";
           }).join("");
           return `
-            <div onclick="selectCmpPhoto('${tc.id}','${tc.photoURL}','${tc.uploaderName||"Unknown"}','${formatDate(tc.capturedAt)}')"
+            <div onclick="selectCmpPhoto('${tc.id}')"
               style="flex-shrink:0;width:120px;scroll-snap-align:start;cursor:pointer;
                      border-radius:var(--radius-md);overflow:hidden;position:relative;
                      border:2px solid ${isSelected ? "var(--orange)" : "var(--card-border)"};
                      transition:border-color 0.15s">
-              <img src="${tc.photoURL}"
+              <img src="${encodeURI(tc.photoURL || "")}"
                 style="width:120px;height:120px;object-fit:cover;display:block" />
               ${tags ? `<div style="position:absolute;bottom:3px;left:4px;font-size:13px;
                                     text-shadow:0 1px 3px rgba(0,0,0,0.8)">${tags}</div>` : ""}
@@ -3439,16 +3483,17 @@ function renderCmpPhotoCarousel() {
     </div>`).join("");
 }
 
-window.selectCmpPhoto = function(id, photoURL, uploaderName, dateStr) {
+window.selectCmpPhoto = function(id) {
   _cmpSelectedPhoto = id;
+  const tc = _cmpAllDocs.find(d => d.id === id) || {};
 
   // Show the selected photo
   const wrap = document.getElementById("cmp-selected-wrap");
   const img  = document.getElementById("cmp-selected-img");
   const info = document.getElementById("cmp-selected-info");
   if (wrap) wrap.style.display = "block";
-  if (img)  img.src = photoURL;
-  if (info) info.textContent = uploaderName + " · " + dateStr;
+  if (img)  img.src = tc.photoURL || "";
+  if (info) info.textContent = (tc.uploaderName || "Unknown") + " · " + formatDate(tc.capturedAt);
 
   // Scroll to top to show comparison
   const el = document.getElementById("harvest-compare-content");
@@ -3460,6 +3505,9 @@ window.selectCmpPhoto = function(id, photoURL, uploaderName, dateStr) {
 
 
 async function archiveOldFeedPosts() {
+  // Only admins run housekeeping, so we don't have every member's client
+  // scanning the whole feed collection and racing to archive the same posts.
+  if (userProfile?.role !== "admin") return;
   try {
     const allSnap = await getDocs(query(collection(db, "feed"), orderBy("createdAt", "desc")));
     if (allSnap.size <= 50) return;
@@ -3494,6 +3542,7 @@ window.openAddTrailCam = async function () {
   window._tcSelectedFiles = [];
   window._tcAlbumId       = null;
   window._tcAlbumName     = null;
+  window._tcAlbums        = albums;
 
   const today = new Date().toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
@@ -3528,15 +3577,15 @@ window.openAddTrailCam = async function () {
           ${albums.length === 0
             ? '<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:8px">No albums yet — create your first one.</div>'
             : albums.map(a => `
-                <button onclick="tcSelectAlbum(\'${a.id}\',\'${(a.name||"").replace(/'/g,"\\'")}\',\'${a.dateLabel||""}\')"
+                <button onclick="tcSelectAlbum('${a.id}')"
                   id="tc-album-btn-${a.id}"
                   style="display:flex;align-items:center;justify-content:space-between;
                          padding:10px 12px;border-radius:var(--radius-md);border:2px solid var(--card-border);
                          background:rgba(255,255,255,0.04);color:var(--text-warm);font-size:13px;
                          cursor:pointer;text-align:left;font-family:var(--font-sans);width:100%">
                   <div>
-                    <div style="font-weight:600">${a.name}</div>
-                    <div style="font-size:11px;color:var(--text-muted)">${a.dateLabel||""} · ${a.photoCount||0} photos</div>
+                    <div style="font-weight:600">${esc(a.name)}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${esc(a.dateLabel||"")} · ${a.photoCount||0} photos</div>
                   </div>
                   <span id="tc-album-check-${a.id}" style="display:none;color:var(--orange);font-size:18px">✓</span>
                 </button>`).join("")}
@@ -3614,6 +3663,10 @@ window.tcAlbumMode = function(mode) {
 };
 
 window.tcSelectAlbum = function(id, name, dateLabel) {
+  if (name === undefined) {
+    const a = (window._tcAlbums || []).find(x => x.id === id) || {};
+    name = a.name || ""; dateLabel = a.dateLabel || "";
+  }
   window._tcAlbumId   = id;
   window._tcAlbumName = name;
   document.querySelectorAll("[id^='tc-album-btn-']").forEach(b => {
@@ -3897,11 +3950,11 @@ function renderCalendarGrid(el) {
           <div style="display:flex;gap:-4px;margin-top:2px">
             ${visitors.map(v => `
               <div style="width:16px;height:16px;border-radius:50%;
-                          background:${v.visitorColor||"#556B2F"};
+                          background:${safeColor(v.visitorColor)};
                           font-size:8px;display:flex;align-items:center;
                           justify-content:center;color:#fff;font-weight:700;
                           margin-right:-4px;border:1px solid rgba(0,0,0,0.3)">
-                ${(v.visitorInitials||"?").slice(0,1)}
+                ${esc((v.visitorInitials||"?").slice(0,1))}
               </div>`).join("")}
           </div>` : ""}
       </div>`;
@@ -3992,13 +4045,13 @@ function renderCalendarGrid(el) {
                     </div>
                     ${visits.map(v => `
                       <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-                        <div class="avatar" style="background:${v.visitorColor||"#556B2F"};
+                        <div class="avatar" style="background:${safeColor(v.visitorColor)};
                              width:28px;height:28px;font-size:10px;flex-shrink:0">
-                          ${v.visitorInitials||"?"}
+                          ${esc(v.visitorInitials||"?")}
                         </div>
                         <div style="flex:1">
-                          <div style="font-size:13px;color:var(--text-warm)">${v.visitorName||"Unknown"}</div>
-                          ${v.notes ? `<div style="font-size:11px;color:var(--text-muted)">${v.notes}</div>` : ""}
+                          <div style="font-size:13px;color:var(--text-warm)">${esc(v.visitorName||"Unknown")}</div>
+                          ${v.notes ? `<div style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word">${esc(v.notes)}</div>` : ""}
                         </div>
                         ${(userProfile?.uid === v.uid || userProfile?.role === "admin") ? `
                           <button onclick="deleteCalendarVisit('${v.id}')"
@@ -4052,13 +4105,13 @@ window.openCalendarDay = function (dateStr) {
         : visits.map(v => `
             <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
                         border-bottom:1px solid rgba(196,169,106,0.08)">
-              <div class="avatar" style="background:${v.visitorColor||"#556B2F"};
+              <div class="avatar" style="background:${safeColor(v.visitorColor)};
                    width:32px;height:32px;font-size:11px">
-                ${v.visitorInitials||"?"}
+                ${esc(v.visitorInitials||"?")}
               </div>
               <div style="flex:1">
-                <div style="font-size:14px;color:var(--text-warm);font-weight:600">${v.visitorName||"Unknown"}</div>
-                ${v.notes ? `<div style="font-size:12px;color:var(--text-muted)">${v.notes}</div>` : ""}
+                <div style="font-size:14px;color:var(--text-warm);font-weight:600">${esc(v.visitorName||"Unknown")}</div>
+                ${v.notes ? `<div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word">${esc(v.notes)}</div>` : ""}
               </div>
             </div>`).join("")}
 
@@ -4373,14 +4426,15 @@ window.doCheckin = async function () {
 // ============================================================
 
 let feedUnsub = null;
+let feedExpandedComments = new Set();  // post ids whose comment thread is open
 
 const AUTO_FEED_TYPES = {
-  checkin:  (d) => `🏕️ <strong>${d.memberName}</strong> has entered the cabin!`,
-  checkout: (d) => `🚪 <strong>${d.memberName}</strong> has left the cabin.`,
-  harvest:  (d) => `🦌 <strong>${d.memberName}</strong> just logged a ${d.speciesIcon} ${d.speciesLabel} harvest!`,
-  trailcam: (d) => `📷 <strong>${d.memberName}</strong> uploaded ${d.count} trail cam photo${d.count!==1?"s":""}!`,
+  checkin:  (d) => `🏕️ <strong>${esc(d.memberName)}</strong> has entered the cabin!`,
+  checkout: (d) => `🚪 <strong>${esc(d.memberName)}</strong> has left the cabin.`,
+  harvest:  (d) => `🦌 <strong>${esc(d.memberName)}</strong> just logged a ${esc(d.speciesIcon)} ${esc(d.speciesLabel)} harvest!`,
+  trailcam: (d) => `📷 <strong>${esc(d.memberName)}</strong> uploaded ${Number(d.count) || 0} trail cam photo${d.count!==1?"s":""}!`,
   trending: (d) => `🔥 A trail cam photo is trending — check it out!`,
-  tier:     (d) => `🎉 Congrats to <strong>${d.memberName}</strong> for reaching ${d.tierIcon} <strong>${d.tierName}</strong> rank!`
+  tier:     (d) => `🎉 Congrats to <strong>${esc(d.memberName)}</strong> for reaching ${esc(d.tierIcon)} <strong>${esc(d.tierName)}</strong> rank!`
 };
 
 async function postAutoFeedEvent(type, data) {
@@ -4408,9 +4462,9 @@ window.renderFeedScreen = function () {
     ${userProfile && !userProfile.isGuest ? `
       <div style="padding:12px 16px;border-bottom:1px solid var(--gold-dim)">
         <div style="display:flex;gap:10px;align-items:center">
-          <div class="avatar" style="background:${userProfile.color};
+          <div class="avatar" style="background:${safeColor(userProfile.color)};
                width:36px;height:36px;font-size:13px;flex-shrink:0">
-            ${userProfile.initials}
+            ${esc(userProfile.initials)}
           </div>
           <button onclick="openFeedCompose()"
             style="flex:1;background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
@@ -4442,6 +4496,7 @@ function loadFeed() {
   feedLastDoc   = null;
   feedAllLoaded = false;
   feedPageSize  = 20;
+  feedExpandedComments.clear();
   const list = document.getElementById("feed-list");
   if (!list) return;
 
@@ -4450,6 +4505,14 @@ function loadFeed() {
   feedUnsub = onSnapshot(q, (snap) => {
     feedLastDoc = snap.docs[snap.docs.length - 1] || null;
     feedAllLoaded = snap.docs.length < feedPageSize;
+
+    // A local optimistic write (our own reaction/comment/post) fires this
+    // handler immediately; the targeted DOM updaters already handled it, so
+    // skip the full rebuild to avoid a flicker / scroll jump.
+    if (snap.metadata.hasPendingWrites) return;
+
+    const scroller = document.getElementById("main-content");
+    const keepScroll = scroller ? scroller.scrollTop : 0;
 
     if (snap.empty) {
       list.innerHTML = `
@@ -4466,7 +4529,14 @@ function loadFeed() {
       <div style="text-align:center;padding:16px">
         <button class="btn btn-secondary btn-sm" onclick="loadMoreFeed()">Load More</button>
       </div>` : "");
-    archiveOldFeedPosts();
+    if (scroller) scroller.scrollTop = keepScroll;
+
+    // Housekeeping: trim the feed at most once per session, and only from the
+    // real server snapshot (not local optimistic writes from reactions/comments).
+    if (!window._feedArchiveRan && !snap.metadata.hasPendingWrites) {
+      window._feedArchiveRan = true;
+      archiveOldFeedPosts();
+    }
   }, err => {
     console.error(err);
     if (list) list.innerHTML = `<div style="color:var(--danger);padding:16px">Could not load feed.</div>`;
@@ -4547,12 +4617,12 @@ function feedPostCard(post) {
                 box-shadow:0 4px 16px rgba(0,0,0,0.3)">
 
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <div class="avatar" style="background:${post.color || "#556B2F"};
+        <div class="avatar" style="background:${safeColor(post.color)};
              width:36px;height:36px;font-size:13px;flex-shrink:0">
-          ${post.initials || "?"}</div>
+          ${esc(post.initials || "?")}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px">
-            <span style="font-size:13px;font-weight:600;color:var(--text-warm)">${post.memberName || "Member"}</span>
+            <span style="font-size:13px;font-weight:600;color:var(--text-warm)">${esc(post.memberName || "Member")}</span>
             ${tierFlair}${killCount}
           </div>
           <div style="font-size:11px;color:var(--text-dim);margin-top:1px">${dateStr}</div>
@@ -4563,10 +4633,10 @@ function feedPostCard(post) {
                    cursor:pointer;padding:4px;border-radius:var(--radius-sm)">🗑</button>` : ""}
       </div>
 
-      <div style="font-size:14px;color:var(--text-warm);line-height:1.55;margin-bottom:10px">
-        ${post.text || ""}
+      <div style="font-size:14px;color:var(--text-warm);line-height:1.55;margin-bottom:10px;white-space:pre-wrap;word-break:break-word">
+        ${esc(post.text || "")}
       </div>
-      ${post.photoURL ? `<img src="${post.photoURL}"
+      ${post.photoURL ? `<img src="${encodeURI(post.photoURL)}"
         style="width:100%;border-radius:var(--radius-md);margin-bottom:10px;
                border:1px solid var(--card-border);display:block" />` : ""}
 
@@ -4600,7 +4670,7 @@ function feedPostCard(post) {
                    font-family:var(--font-sans)">${e}</button>`).join("") : ""}
       </div>
 
-      <div id="feed-comments-${post.id}" class="hidden">
+      <div id="feed-comments-${post.id}" class="${feedExpandedComments.has(post.id) ? "" : "hidden"}">
         <div class="fade-divider-plain" style="margin:0 0 10px"></div>
         ${renderComments(comments, post.id, "feed")}
         ${userProfile && !userProfile.isGuest ? `
@@ -4624,7 +4694,10 @@ window.toggleFeedReactPicker = function (id) {
 
 window.toggleFeedComments = function (id) {
   const el = document.getElementById("feed-comments-" + id);
-  if (el) el.classList.toggle("hidden");
+  if (!el) return;
+  const nowHidden = el.classList.toggle("hidden");
+  if (nowHidden) feedExpandedComments.delete(id);
+  else feedExpandedComments.add(id);
 };
 
 window.addFeedReaction = async function (id, emoji) {
@@ -4686,8 +4759,8 @@ window.openFeedCompose = function () {
     <div class="modal-box" style="max-width:380px">
       <div class="modal-title">New Post</div>
       <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px">
-        <div class="avatar" style="background:${userProfile.color};
-             width:36px;height:36px;font-size:13px;flex-shrink:0">${userProfile.initials}</div>
+        <div class="avatar" style="background:${safeColor(userProfile.color)};
+             width:36px;height:36px;font-size:13px;flex-shrink:0">${esc(userProfile.initials)}</div>
         <textarea id="feed-compose-text" placeholder="What's on your mind?"
           style="flex:1;min-height:100px;resize:none"></textarea>
       </div>
@@ -4817,8 +4890,8 @@ window.renderMyKillsScreen = async function () {
                    border-radius:var(--radius-md);color:var(--text-warm);padding:8px 10px;
                    font-size:13px;font-family:var(--font-sans)">
             ${members.map(m => `
-              <option value="${m.uid}" ${m.uid===viewUid?"selected":""}>
-                ${m.uid===userProfile.uid ? "🎯 My Kills" : m.displayName}
+              <option value="${esc(m.uid)}" ${m.uid===viewUid?"selected":""}>
+                ${m.uid===userProfile.uid ? "🎯 My Kills" : esc(m.displayName)}
               </option>`).join("")}
           </select>
         </div>
@@ -4827,7 +4900,7 @@ window.renderMyKillsScreen = async function () {
         <div class="card card-highlight" style="text-align:center;padding:20px">
           <div style="font-size:48px;margin-bottom:8px">${tier ? tier.icon : "🎯"}</div>
           <div style="font-family:var(--font-serif);font-size:20px;color:var(--gold);margin-bottom:4px">
-            ${isOwn ? "" : `<div style="font-size:13px;color:var(--text-muted);margin-bottom:4px">${viewName}</div>`}
+            ${isOwn ? "" : `<div style="font-size:13px;color:var(--text-muted);margin-bottom:4px">${esc(viewName)}</div>`}
             ${tier ? tier.name : "No rank yet"}
           </div>
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
@@ -4925,7 +4998,7 @@ window.renderMyKillsScreen = async function () {
         <div>
           <div style="font-size:12px;color:var(--text-muted);letter-spacing:0.5px;
                       text-transform:uppercase;margin-bottom:10px">
-            ${isOwn ? "Your Harvest History" : viewName + "'s Harvests"}
+            ${isOwn ? "Your Harvest History" : esc(viewName) + "'s Harvests"}
           </div>
           ${myKillsData.length === 0
             ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:8px 0">No harvests logged yet.</div>`
@@ -4979,13 +5052,13 @@ function renderMyKillRow(h, isOwn) {
               ${stats.map(s => `
                 <span style="background:rgba(196,169,106,0.12);border:1px solid var(--gold-dim);
                              border-radius:20px;padding:4px 10px;font-size:12px;color:var(--gold)">
-                  ${s}
+                  ${esc(s)}
                 </span>`).join("")}
             </div>` : ""}
           ${h.notes ? `<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;
-                                   line-height:1.5;font-style:italic">"${h.notes}"</div>` : ""}
+                                   line-height:1.5;font-style:italic;white-space:pre-wrap;word-break:break-word">"${esc(h.notes)}"</div>` : ""}
           ${h.photoURL ? `
-            <img src="${h.photoURL}"
+            <img src="${encodeURI(h.photoURL)}"
               style="width:100%;border-radius:var(--radius-md);margin-bottom:12px;
                      border:1px solid var(--card-border);display:block;
                      max-height:200px;object-fit:cover" />` : ""}
