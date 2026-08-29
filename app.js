@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.9.3";
+const APP_VERSION = "lite-2.10.0";
 
 
 
@@ -551,7 +551,8 @@ window.goTo = function (screenId) {
     case "screen-updates":  renderUpdatesScreen();  break;
     case "screen-bylaws":   renderBylawsScreen();   break;
     case "screen-contests": renderContestsScreen(); break;
-    case "screen-mykills":  renderMyKillsScreen();  break;
+    case "screen-mykills":  renderTrophyRoom();     break;
+    case "screen-master-trophy": renderMasterTrophyRoom(); break;
     case "screen-admin":    renderAdminScreen();    break;
   }
 };
@@ -1271,6 +1272,14 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.10.0", date: "Aug 2026", notes: [
+      "Renamed My Kills to the Trophy Room",
+      "Trophy Room now shows a stat card per category — camp ranking, by-year charts, and award badges",
+      "Added the Master Trophy Room: the champion and runner-up in every category",
+      "Contest wins and biggest-of-the-year now appear as badges on your stat cards",
+      "The harvest form links straight to the Trophy Room; a confirmation appears after logging",
+      "Header counter now reads 🏆 with your trophy count"
+    ]},
     { version: "lite-2.9.3", date: "Aug 2026", notes: [
       "Fixed the 😊 React button on harvests — it wasn't opening the emoji picker",
       "Photo uploads can no longer hang if an image fails to read",
@@ -2968,6 +2977,9 @@ function showHarvestForm(data) {
   overlay.innerHTML = `
     <div class="modal-box" style="max-width:380px;max-height:90vh;overflow-y:auto">
       <div class="modal-title">${editingHarvestId ? "Edit Harvest" : "Log Harvest"}</div>
+      <button type="button" onclick="closeHarvestForm();goTo('screen-mykills')"
+        style="background:none;border:none;color:var(--gold);font-size:12px;cursor:pointer;
+               padding:0;margin:0 0 12px;font-family:var(--font-sans)">🏆 View your Trophy Room →</button>
 
       <div class="input-group" style="margin-bottom:12px">
         <label>Species</label>
@@ -3230,6 +3242,8 @@ window.saveHarvest = async function () {
       updatedAt:        serverTimestamp()
     };
 
+    trophyCache = null;   // stats need a recompute next time the Trophy Room opens
+
     if (editingHarvestId) {
       await updateDoc(doc(db, "harvests", editingHarvestId), payload);
       closeHarvestForm();
@@ -3241,8 +3255,8 @@ window.saveHarvest = async function () {
       payload.comments  = [];
       const newDoc = await addDoc(collection(db, "harvests"), payload);
       closeHarvestForm();
-      showToast("Harvest logged! 🦌", "success");
       expandedHarvests.add(newDoc.id);
+      trophyAddedPrompt();
       // Record kill points + post to feed
       await recordKill(payload);
       await postAutoFeedEvent("harvest", {
@@ -3260,9 +3274,32 @@ window.saveHarvest = async function () {
   }
 };
 
+// Shown right after a new harvest is logged — the trophy landed, here's where it lives.
+function trophyAddedPrompt() {
+  document.getElementById("trophy-added-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "modal-overlay"; ov.id = "trophy-added-overlay";
+  ov.innerHTML = `
+    <div class="modal-box" style="max-width:300px;text-align:center">
+      <div style="font-size:42px;margin-bottom:8px">🏆</div>
+      <div style="font-family:var(--font-serif);font-size:19px;color:var(--gold);margin-bottom:4px">Trophy added</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:18px">It's on the board and in your stats.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-primary btn-full btn-sm"
+          onclick="document.getElementById('trophy-added-overlay').remove();goTo('screen-mykills')">
+          See it in the Trophy Room
+        </button>
+        <button class="btn btn-secondary btn-full btn-sm"
+          onclick="document.getElementById('trophy-added-overlay').remove()">Done</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+
 window.deleteHarvest = function (id) {
   appConfirm("Delete Harvest", "Permanently delete this harvest? This will also remove the feed notification and adjust your kill points.", async () => {
     try {
+      trophyCache = null;
       // Get harvest data before deleting
       const snap = await getDoc(doc(db, "harvests", id));
       const hData = snap.data();
@@ -4768,7 +4805,7 @@ async function updateKillCounter() {
     // Update header badge
     const badge = document.getElementById("kill-counter-badge");
     if (badge) {
-      badge.textContent = `${tier ? tier.icon : ""} Kills: ${String(kills).padStart(6,"0")}`;
+      badge.textContent = `${tier ? tier.icon + " " : "🏆 "}${kills}`;
     }
   } catch(err) { console.error("Kill counter error:", err); }
 }
@@ -5373,208 +5410,592 @@ window.submitFeedPost = async function () {
 };
 
 // ============================================================
-// MY KILLS PAGE
+// TROPHY ROOM  (was "My Kills")
+// A stats drop-off: every harvest is a trophy, the room accumulates the
+// numbers. Personal stat-card feed + a camp-wide "Master Trophy Room".
 // ============================================================
 
-let myKillsExpanded  = new Set();
-let myKillsData      = [];        // cached harvest docs for current view
-let myKillsViewingUid = null;     // null = own kills, uid = someone else's
+let trophyExpanded = new Set();   // harvest-log row ids that are open
+let trophyEntries  = [];          // the current member's harvest docs, newest first
 
-window.renderMyKillsScreen = async function () {
+// ---- shared data layer (feeds both screens, cached per session) ----
+let trophyCache = null;           // { at, harvests, contestEntries, contestMeta, members }
+const TROPHY_TTL = 5 * 60 * 1000;
+
+async function loadTrophyData(force) {
+  if (!force && trophyCache && Date.now() - trophyCache.at < TROPHY_TTL) return trophyCache;
+  const [hSnap, ceSnap, cmSnap, uSnap] = await Promise.all([
+    getDocs(collection(db, "harvests")),
+    getDocs(collection(db, "contestEntries")),
+    getDocs(collection(db, "contestMeta")),
+    getDocs(collection(db, "users"))
+  ]);
+  const members = {};
+  uSnap.docs.forEach(d => {
+    const u = d.data();
+    if (!u.isGuest && u.displayName) {
+      members[d.id] = { uid: d.id, name: u.displayName, initials: u.initials || "?", color: u.color || "#556B2F" };
+    }
+  });
+  const contestMeta = {};
+  cmSnap.docs.forEach(d => { contestMeta[d.id] = d.data(); });
+  trophyCache = {
+    at: Date.now(),
+    harvests:       hSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(h => h.uid && h.harvestDate),
+    contestEntries: ceSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+    contestMeta,
+    members
+  };
+  return trophyCache;
+}
+
+function harvestYear(h) {
+  const d = h.harvestDate?.toDate ? h.harvestDate.toDate() : new Date(h.harvestDate || 0);
+  return d.getFullYear();
+}
+function harvestMillis(h) {
+  return h.harvestDate?.toMillis ? h.harvestDate.toMillis() : new Date(h.harvestDate || 0).getTime();
+}
+function isBuck(h) { return h.species === "deer" && h.deerType === "buck"; }
+function isDoe(h)  { return h.species === "deer" && h.deerType === "doe"; }
+
+function longestStreak(years) {
+  const s = [...new Set(years)].filter(y => y > 1990).sort((a, b) => a - b);
+  if (!s.length) return 0;
+  let best = 1, cur = 1;
+  for (let i = 1; i < s.length; i++) {
+    if (s[i] === s[i - 1] + 1) { cur++; best = Math.max(best, cur); }
+    else cur = 1;
+  }
+  return best;
+}
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+function emptyMemberStats(uid) {
+  return { uid, harvests: 0, bucks: 0, does: 0, points: 0, heaviest: 0, bestRack: 0,
+           longestBeard: 0, longestSpur: 0, byYear: {}, bucksByYear: {}, years: new Set(), first: null };
+}
+
+function computeTrophyStats(cache) {
+  const { harvests, contestEntries, contestMeta, members } = cache;
+  const per = {};
+  Object.keys(members).forEach(uid => { per[uid] = emptyMemberStats(uid); });
+  const ensure = uid => per[uid] || (per[uid] = emptyMemberStats(uid));
+
+  const yearBuckLeader = {};   // year -> {uid, value}
+  const yhc = {};              // year -> uid -> harvest count
+
+  harvests.forEach(h => {
+    const m = ensure(h.uid);
+    const y = harvestYear(h);
+    m.harvests += 1;
+    m.points   += computeKillPoints(h);
+    if (isBuck(h)) { m.bucks++; m.bucksByYear[y] = (m.bucksByYear[y] || 0) + 1; }
+    if (isDoe(h))  { m.does++; }
+    const w = Number(h.weight) || 0;
+    if (w > m.heaviest) m.heaviest = w;
+    if (isBuck(h)) { const r = Number(h.rackScore) || 0; if (r > m.bestRack) m.bestRack = r; }
+    const bl = Number(h.beardLength) || 0;
+    if (bl > m.longestBeard) m.longestBeard = bl;
+    const spur = Math.max(Number(h.spurLeft) || 0, Number(h.spurRight) || 0);
+    if (spur > m.longestSpur) m.longestSpur = spur;
+    m.byYear[y] = (m.byYear[y] || 0) + 1;
+    m.years.add(y);
+    if (m.first === null || y < m.first) m.first = y;
+
+    if (isBuck(h) && Number(h.rackScore) > 0) {
+      if (!yearBuckLeader[y] || Number(h.rackScore) > yearBuckLeader[y].value)
+        yearBuckLeader[y] = { uid: h.uid, value: Number(h.rackScore) };
+    }
+    (yhc[y] = yhc[y] || {});
+    yhc[y][h.uid] = (yhc[y][h.uid] || 0) + 1;
+  });
+
+  const yearHarvestLeader = {};
+  Object.entries(yhc).forEach(([y, counts]) => {
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    if (top) yearHarvestLeader[y] = { uid: top[0], value: top[1] };
+  });
+
+  const ids = Object.keys(per);
+  const rank = valueFn => ids
+    .map(uid => ({ uid, value: valueFn(per[uid]) }))
+    .filter(r => r.value > 0)
+    .sort((a, b) => b.value - a.value);
+
+  const rankings = {
+    harvests:   rank(m => m.harvests),
+    bucks:      rank(m => m.bucks),
+    does:       rank(m => m.does),
+    points:     rank(m => m.points),
+    heaviest:   rank(m => m.heaviest),
+    bestRack:   rank(m => m.bestRack),
+    beard:      rank(m => m.longestBeard),
+    spur:       rank(m => m.longestSpur),
+    bestSeason: rank(m => Math.max(0, ...Object.values(m.byYear))),
+    streak:     rank(m => longestStreak([...m.years]))
+  };
+
+  // all-time biggest single bucks (for the "since YYYY" standing)
+  const allBucks = harvests
+    .filter(h => isBuck(h) && Number(h.rackScore) > 0)
+    .map(h => ({ uid: h.uid, value: Number(h.rackScore), year: harvestYear(h) }))
+    .sort((a, b) => b.value - a.value);
+  const firstYear = harvests.reduce((min, h) => Math.min(min, harvestYear(h)), new Date().getFullYear());
+
+  // contest placements (only crowned/closed seasons)
+  const placements = {};
+  const byContest = {};
+  contestEntries.forEach(e => {
+    const key = (e.contest || "") + "_" + (e.year || "");
+    (byContest[key] = byContest[key] || []).push(e);
+  });
+  Object.entries(byContest).forEach(([key, entries]) => {
+    if (!contestMeta[key]?.closed) return;
+    const [contest, year] = key.split("_");
+    const c = CONTESTS[contest];
+    [...entries].sort((a, b) => (Number(b.measure) || 0) - (Number(a.measure) || 0)).forEach((e, i) => {
+      if (i > 2 || !e.uid) return;
+      (placements[e.uid] = placements[e.uid] || []).push({
+        contest, year: Number(year), place: i + 1,
+        measure: (Number(e.measure) || 0) + (c?.unit || ""),
+        label: c?.label || contest
+      });
+    });
+  });
+
+  return { per, rankings, yearBuckLeader, yearHarvestLeader, allBucks, firstYear, placements };
+}
+
+// ---- small render helpers ----
+function trophyContextLine(rank, unit, members) {
+  if (!rank) return "";
+  if (rank.pos === 1) return "nobody at camp has more";
+  const ahead = rank.ahead;
+  if (ahead.length === 1) {
+    const a = ahead[0];
+    return `only ${esc(members[a.uid]?.name || "someone")} is ahead (${a.value}${unit})`;
+  }
+  const top = ahead[0];
+  return `${ahead.length} ahead — ${esc(members[top.uid]?.name || "?")} leads with ${top.value}${unit}`;
+}
+
+function trophyYearBars(byYearObj) {
+  const years = Object.keys(byYearObj).map(Number).filter(y => y > 1990).sort((a, b) => a - b);
+  if (years.length < 2) return "";
+  const max = Math.max(...years.map(y => byYearObj[y]));
+  return `<div style="display:flex;align-items:flex-end;gap:5px;height:40px;margin:6px 0 8px">
+    ${years.map(y => {
+      const v = byYearObj[y], best = v === max;
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px" title="${y}: ${v}">
+        <div style="width:100%;height:${Math.max(10, Math.round(v / max * 100))}%;
+             background:${best ? "var(--gold)" : "rgba(196,169,106,0.3)"};border-radius:3px 3px 0 0"></div>
+        <span style="font-size:10px;color:var(--text-dim)">'${String(y).slice(2)}</span>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+function trophyBadges(list) {
+  if (!list || !list.length) return "";
+  return `<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+    ${list.map(b => `
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+        <span style="font-size:13px;flex-shrink:0">${b.icon}</span>
+        <span style="color:${b.strong ? "var(--gold)" : "var(--text-muted)"};line-height:1.35">${esc(b.text)}</span>
+      </div>`).join("")}
+  </div>`;
+}
+
+function trophyStatCard(c) {
+  const dim = !c.hasData;
+  const chip = c.rank
+    ? `<span style="font-size:11.5px;font-weight:600;color:#241206;background:var(--gold);
+         border-radius:6px;padding:2px 8px;flex-shrink:0">${c.rank.pos === 1 ? "#1 at camp" : "#" + c.rank.pos + " at camp"}</span>`
+    : "";
+  const gap = (c.chart || c.context || (c.badges && c.badges.length)) ? "10px" : "0";
+  return `
+    <div style="background:var(--forest-card);border:1px solid var(--card-border);
+                border-radius:14px;padding:14px;margin-bottom:12px;${dim ? "opacity:0.5" : ""}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        ${chip}
+        <span style="font-size:11px;color:var(--text-muted);letter-spacing:0.7px;text-transform:uppercase;
+                     overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(c.title)}</span>
+        ${c.trophy ? `<span style="margin-left:auto;font-size:15px;flex-shrink:0">🏆</span>` : ""}
+      </div>
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:${gap}">
+        <span style="font-size:28px;font-weight:600;color:var(--text-warm);line-height:1">${esc(c.value)}</span>
+        <span style="font-size:12px;color:var(--text-muted)">${esc(c.sub || "")}</span>
+      </div>
+      ${c.chart || ""}
+      ${c.context ? `<div style="font-size:11px;color:var(--text-dim)">${c.context}</div>` : ""}
+      ${trophyBadges(c.badges)}
+    </div>`;
+}
+
+function pointsReferenceHTML(pts) {
+  return `
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Tier ladder</div>
+      ${KILL_TIERS.map(t => `
+        <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(196,169,106,0.07)">
+          <span style="font-size:16px;min-width:32px">${t.icon}</span>
+          <div style="flex:1"><div style="font-size:13px;font-weight:600;color:${pts >= t.pts ? "var(--gold)" : "var(--text-warm)"}">${t.name}</div></div>
+          <div style="font-size:12px;color:var(--text-muted)">${t.pts} pts</div>
+          ${pts >= t.pts ? `<span style="font-size:11px;color:var(--success)">✓</span>` : ""}
+        </div>`).join("")}
+    </div>
+    <div>
+      <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Points per kill</div>
+      ${[["🦌 Buck deer", 10], ["🦌 Doe deer", 5], ["🦃 Turkey tom", 10], ["🦃 Jake / hen", 5],
+         ["🐻 Bear", 15], ["🦆 Waterfowl", "2/bird"], ["🐿️ Small game", "1/animal"], ["🎯 Other", 2]
+        ].map(([label, p]) => `
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(196,169,106,0.07)">
+          <span style="font-size:13px;color:var(--text-muted)">${label}</span>
+          <span style="font-size:13px;color:var(--gold);font-weight:600">${p}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+window.renderTrophyRoom = async function () {
   const content = document.getElementById("mykills-content");
   if (!content) return;
   if (!userProfile || userProfile.isGuest) {
-    content.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">Sign in to view kills.</div>`;
+    content.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">Sign in to see your Trophy Room.</div>`;
     return;
   }
-
-  content.innerHTML = `<div style="padding:32px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>`;
-
-  // Default to own kills on first load
-  if (myKillsViewingUid === undefined) myKillsViewingUid = null;
-  const viewUid = myKillsViewingUid || userProfile.uid;
-  const isOwn   = viewUid === userProfile.uid;
+  content.innerHTML = `<div style="padding:44px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>`;
 
   try {
-    // Load all members for dropdown
-    const membersSnap = await getDocs(collection(db, "users"));
-    const members = membersSnap.docs
-      .map(d => ({ uid: d.id, ...d.data() }))
-      .filter(m => !m.isGuest && m.displayName);
+    const cache = await loadTrophyData(false);
+    const stats = computeTrophyStats(cache);
+    const M     = cache.members;
+    const uid   = userProfile.uid;
+    const me    = stats.per[uid] || emptyMemberStats(uid);
 
-    // Load viewed user profile
-    const viewSnap = await getDoc(doc(db, "users", viewUid));
-    const viewData = viewSnap.data() || {};
-    const kills    = viewData.totalKills || 0;
-    const pts      = viewData.killPoints  || 0;
-    const tier     = getTierForPoints(pts);
-    const nextTier = getNextTier(pts);
-    const progress = nextTier ? Math.min(100, Math.round((pts / nextTier.pts) * 100)) : 100;
-    const viewName = viewData.displayName || "Member";
+    trophyEntries = cache.harvests
+      .filter(h => h.uid === uid)
+      .sort((a, b) => harvestMillis(b) - harvestMillis(a));
 
-    // Load harvests. Filter by member only, then sort newest-first in JS —
-    // that avoids needing a composite Firestore index for where + orderBy.
-    const q    = query(collection(db, "harvests"), where("uid","==",viewUid));
-    const snap = await getDocs(q);
-    myKillsData = snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => {
-        const ta = a.harvestDate?.toMillis ? a.harvestDate.toMillis() : new Date(a.harvestDate || 0).getTime();
-        const tb = b.harvestDate?.toMillis ? b.harvestDate.toMillis() : new Date(b.harvestDate || 0).getTime();
-        return tb - ta;
-      });
+    const rankOf = list => {
+      const i = list.findIndex(r => r.uid === uid);
+      return i < 0 ? null : { pos: i + 1, total: list.length, ahead: list.slice(0, i) };
+    };
+    const cards = [];
 
-    // Species breakdown
-    const breakdown = {};
-    myKillsData.forEach(h => {
-      const sp = h.species || "other";
-      breakdown[sp] = (breakdown[sp] || 0) + 1;
+    // Rank & points
+    const pts = me.points || 0;
+    const tier = getTierForPoints(pts), nextTier = getNextTier(pts);
+    const ptsRank = rankOf(stats.rankings.points);
+    cards.push({
+      _rank: ptsRank ? ptsRank.pos : 90, hasData: pts > 0, title: "Rank & points",
+      rank: ptsRank, trophy: !!(ptsRank && ptsRank.pos === 1),
+      value: tier ? tier.icon + " " + tier.name : "No rank yet",
+      sub: pts + " kill points",
+      chart: nextTier ? `<div style="margin:4px 0 8px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:4px">
+          <span>next: ${nextTier.icon} ${esc(nextTier.name)}</span><span>${pts} / ${nextTier.pts}</span>
+        </div>
+        <div style="background:rgba(255,255,255,0.08);border-radius:8px;height:6px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(100, Math.round(pts / nextTier.pts * 100))}%;
+               background:linear-gradient(135deg,var(--orange),var(--orange-bright))"></div>
+        </div></div>` : (pts > 0 ? `<div style="font-size:11px;color:var(--gold);margin-bottom:6px">Top of the ladder.</div>` : ""),
+      context: trophyContextLine(ptsRank, " pts", M), badges: []
     });
 
+    // Total harvests
+    const hRank = rankOf(stats.rankings.harvests);
+    cards.push({
+      _rank: hRank ? hRank.pos : 90, hasData: me.harvests > 0, title: "Trophies logged",
+      rank: hRank, trophy: !!(hRank && hRank.pos === 1),
+      value: String(me.harvests), sub: "all-time",
+      chart: trophyYearBars(me.byYear), context: trophyContextLine(hRank, "", M),
+      badges: Object.entries(stats.yearHarvestLeader)
+        .filter(([, l]) => l.uid === uid).sort((a, b) => b[0] - a[0]).slice(0, 3)
+        .map(([y]) => ({ icon: "★", text: `Most harvests at camp in ${y}`, strong: false }))
+    });
+
+    // Bucks
+    const bRank = rankOf(stats.rankings.bucks);
+    cards.push({
+      _rank: bRank ? bRank.pos : 90, hasData: me.bucks > 0, title: "Bucks harvested",
+      rank: bRank, trophy: !!(bRank && bRank.pos === 1),
+      value: String(me.bucks), sub: me.bucks === 1 ? "buck" : "bucks",
+      chart: trophyYearBars(me.bucksByYear), context: trophyContextLine(bRank, "", M), badges: []
+    });
+
+    // Buck size / best rack
+    const rRank = rankOf(stats.rankings.bestRack);
+    const rackBadges = [];
+    (stats.placements[uid] || []).filter(p => p.contest === "buck" || p.contest === "bowbuck").forEach(p => {
+      rackBadges.push({
+        icon: p.place === 1 ? "🏆" : p.place === 2 ? "🥈" : "🥉",
+        text: (p.place === 1 ? "Won " : p.place === 2 ? "Runner-up, " : "3rd, ") + p.label + " " + p.year
+              + (p.place === 1 ? "" : " (" + p.measure + ")"),
+        strong: p.place === 1
+      });
+    });
+    Object.entries(stats.yearBuckLeader)
+      .filter(([, lead]) => lead.uid === uid)
+      .sort((a, b) => b[0] - a[0]).slice(0, 3)
+      .forEach(([y]) => rackBadges.push({ icon: "★", text: `Biggest buck at camp in ${y}`, strong: false }));
+    if (me.bestRack > 0) {
+      const pos = stats.allBucks.findIndex(x => x.uid === uid && x.value === me.bestRack);
+      if (pos === 0) rackBadges.push({ icon: "👑", text: "Biggest buck at camp — ever", strong: true });
+      else if (pos > 0 && pos < 5) rackBadges.push({ icon: "★", text: `${ordinal(pos + 1)}-biggest at camp since ${stats.firstYear}`, strong: false });
+    }
+    cards.push({
+      _rank: rRank ? rRank.pos : 90, hasData: me.bestRack > 0, title: "Buck size",
+      rank: rRank, trophy: !!(rRank && rRank.pos === 1),
+      value: me.bestRack ? me.bestRack + '"' : "—",
+      sub: me.bestRack ? "your best rack, B&C" : "no scored bucks yet",
+      chart: "", context: trophyContextLine(rRank, '"', M), badges: rackBadges
+    });
+
+    // Heaviest animal
+    const wRank = rankOf(stats.rankings.heaviest);
+    cards.push({
+      _rank: wRank ? wRank.pos : 90, hasData: me.heaviest > 0, title: "Heaviest animal",
+      rank: wRank, trophy: !!(wRank && wRank.pos === 1),
+      value: me.heaviest ? me.heaviest + " lbs" : "—", sub: "field weight",
+      chart: "", context: trophyContextLine(wRank, " lbs", M), badges: []
+    });
+
+    // Does
+    const dRank = rankOf(stats.rankings.does);
+    cards.push({
+      _rank: dRank ? dRank.pos : 90, hasData: me.does > 0, title: "Does harvested",
+      rank: dRank, trophy: !!(dRank && dRank.pos === 1),
+      value: String(me.does), sub: me.does === 1 ? "doe" : "does",
+      chart: "", context: trophyContextLine(dRank, "", M), badges: []
+    });
+
+    // Longest beard (only surface if there's turkey data anywhere)
+    if (stats.rankings.beard.length || me.longestBeard) {
+      const beardRank = rankOf(stats.rankings.beard);
+      cards.push({
+        _rank: beardRank ? beardRank.pos : 90, hasData: me.longestBeard > 0, title: "Longest beard",
+        rank: beardRank, trophy: !!(beardRank && beardRank.pos === 1),
+        value: me.longestBeard ? me.longestBeard + '"' : "—", sub: "turkey",
+        chart: "", context: trophyContextLine(beardRank, '"', M), badges: []
+      });
+    }
+    if (stats.rankings.spur.length || me.longestSpur) {
+      const spurRank = rankOf(stats.rankings.spur);
+      cards.push({
+        _rank: spurRank ? spurRank.pos : 90, hasData: me.longestSpur > 0, title: "Longest spurs",
+        rank: spurRank, trophy: !!(spurRank && spurRank.pos === 1),
+        value: me.longestSpur ? me.longestSpur + '"' : "—", sub: "turkey",
+        chart: "", context: trophyContextLine(spurRank, '"', M), badges: []
+      });
+    }
+
+    // Best season
+    const yrVals = Object.values(me.byYear);
+    const bestSeasonCount = yrVals.length ? Math.max(...yrVals) : 0;
+    const bestSeasonYear  = Object.entries(me.byYear).sort((a, b) => b[1] - a[1])[0]?.[0];
+    cards.push({
+      _rank: 70, hasData: bestSeasonCount > 0, title: "Best season",
+      rank: rankOf(stats.rankings.bestSeason), trophy: false,
+      value: String(bestSeasonCount),
+      sub: bestSeasonYear ? `trophies in ${bestSeasonYear}` : "no seasons yet",
+      chart: "", context: "", badges: []
+    });
+
+    // Seasons running
+    const streak = longestStreak([...me.years]);
+    if (streak >= 2) {
+      cards.push({
+        _rank: 75, hasData: true, title: "Seasons running",
+        rank: rankOf(stats.rankings.streak), trophy: false,
+        value: String(streak), sub: "years in a row with a filled tag",
+        chart: "", context: "", badges: []
+      });
+    }
+
+    // Records held summary (goes first)
+    const records = [];
+    if (stats.rankings.harvests[0]?.uid === uid) records.push("most trophies");
+    if (stats.rankings.bucks[0]?.uid === uid)    records.push("most bucks");
+    if (stats.allBucks[0]?.uid === uid)          records.push("biggest buck");
+    if (stats.rankings.heaviest[0]?.uid === uid) records.push("heaviest animal");
+    if (stats.rankings.points[0]?.uid === uid)   records.push("most points");
+    if (stats.rankings.beard[0]?.uid === uid)    records.push("longest beard");
+    if (records.length) {
+      cards.push({
+        _rank: -1, hasData: true, title: "Camp records held", rank: null, trophy: true,
+        value: String(records.length), sub: records.length === 1 ? "record" : "records",
+        chart: "", context: `<span style="color:var(--gold)">${esc(records.join(" · "))}</span>`, badges: []
+      });
+    }
+
+    cards.sort((a, b) => (b.hasData - a.hasData) || (a._rank - b._rank));
+
+    // Hero line
+    const highlights = [];
+    if (records.length) highlights.push(records.length + (records.length === 1 ? " camp record" : " camp records"));
+    if (bRank && bRank.pos <= 3) highlights.push("#" + bRank.pos + " for bucks");
+    if (tier) highlights.push(tier.name);
+    const heroLine = highlights.length ? highlights.join(" · ")
+      : (me.harvests ? me.harvests + " trophies logged" : "empty room — go fill a tag");
+
     content.innerHTML = `
-      <div style="padding:16px;display:flex;flex-direction:column;gap:14px;padding-bottom:80px">
-
-        <!-- Member picker dropdown -->
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="font-size:13px;color:var(--text-muted);flex-shrink:0">Viewing:</div>
-          <select id="mykills-member-select" onchange="switchKillsView(this.value)"
-            style="flex:1;background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
-                   border-radius:var(--radius-md);color:var(--text-warm);padding:8px 10px;
-                   font-size:13px;font-family:var(--font-sans)">
-            ${members.map(m => `
-              <option value="${esc(m.uid)}" ${m.uid===viewUid?"selected":""}>
-                ${m.uid===userProfile.uid ? "🎯 My Kills" : esc(m.displayName)}
-              </option>`).join("")}
-          </select>
+      <div style="padding:14px 16px 90px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div class="avatar" style="background:${safeColor(userProfile.color)};width:44px;height:44px;font-size:15px;flex-shrink:0">${esc(userProfile.initials)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:16px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(userProfile.displayName)}</div>
+            <div style="font-size:12px;color:var(--gold);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(heroLine)}</div>
+          </div>
+          <button onclick="refreshTrophyRoom()" title="Refresh"
+            style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);border-radius:8px;
+                   width:32px;height:32px;color:var(--text-muted);cursor:pointer;flex-shrink:0;font-size:15px">↻</button>
         </div>
 
-        <!-- Rank card -->
-        <div class="card card-highlight" style="text-align:center;padding:20px">
-          <div style="font-size:48px;margin-bottom:8px">${tier ? tier.icon : "🎯"}</div>
-          <div style="font-family:var(--font-serif);font-size:20px;color:var(--gold);margin-bottom:4px">
-            ${isOwn ? "" : `<div style="font-size:13px;color:var(--text-muted);margin-bottom:4px">${esc(viewName)}</div>`}
-            ${tier ? tier.name : "No rank yet"}
-          </div>
-          <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
-            ${pts} kill points · ${kills} harvest${kills !== 1 ? "s" : ""}
-          </div>
-          ${nextTier ? `
-            <div style="margin-bottom:6px">
-              <div style="display:flex;justify-content:space-between;font-size:11px;
-                          color:var(--text-muted);margin-bottom:5px">
-                <span>Progress to ${nextTier.icon} ${nextTier.name}</span>
-                <span>${pts} / ${nextTier.pts}</span>
-              </div>
-              <div style="background:rgba(255,255,255,0.08);border-radius:10px;height:8px;overflow:hidden">
-                <div style="background:linear-gradient(135deg,var(--orange),var(--orange-bright));
-                            height:100%;width:${progress}%;border-radius:10px;
-                            transition:width 0.5s ease"></div>
-              </div>
-            </div>` : `
-            <div style="color:var(--gold);font-size:13px">Maximum rank achieved. Legend.</div>`}
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goHarvest()">🦌 Harvest log</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goMasterTrophyRoom()">🏆 Camp board</button>
         </div>
 
-        <!-- How to rank up (own view only) -->
-        ${isOwn ? `
-        <div>
-          <button class="tc-row-header" id="rankup-toggle"
-            onclick="toggleMyKillsSection('rankup')" style="margin-bottom:0">
+        ${me.harvests ? cards.map(trophyStatCard).join("") : `
+          <div style="text-align:center;padding:36px 8px;color:var(--text-muted)">
+            <div style="font-size:44px;margin-bottom:10px">🏆</div>
+            <div style="font-size:14px">No trophies yet.</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px">Log a harvest and the numbers start stacking up here.</div>
+          </div>`}
+
+        ${trophyEntries.length ? `
+          <div style="margin-top:6px">
+            <button class="tc-row-header" id="troom-log-toggle" onclick="toggleTrophySection('troom-log')" style="margin-bottom:0">
+              <span style="font-size:16px">🦌</span>
+              <div style="flex:1;text-align:left">
+                <div style="font-size:14px;font-weight:600;color:var(--text-warm)">Your harvest log</div>
+                <div style="font-size:12px;color:var(--text-muted)">${trophyEntries.length} ${trophyEntries.length === 1 ? "entry" : "entries"}</div>
+              </div>
+              <span id="troom-log-arrow" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
+            </button>
+            <div id="troom-log-content" class="hidden" style="padding-top:8px">
+              ${trophyEntries.map(renderTrophyEntry).join("")}
+            </div>
+          </div>` : ""}
+
+        <div style="margin-top:8px">
+          <button class="tc-row-header" id="troom-pts-toggle" onclick="toggleTrophySection('troom-pts')" style="margin-bottom:0">
             <span style="font-size:16px">📈</span>
             <div style="flex:1;text-align:left">
-              <div style="font-size:14px;font-weight:600;color:var(--text-warm)">How to Rank Up</div>
-              <div style="font-size:12px;color:var(--text-muted)">Point values per species</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text-warm)">How points work</div>
+              <div style="font-size:12px;color:var(--text-muted)">Tiers and point values</div>
             </div>
-            <span id="rankup-arrow" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
+            <span id="troom-pts-arrow" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
           </button>
-          <div id="rankup-content" class="hidden"
-            style="background:rgba(14,10,4,0.92);border:1px solid var(--gold-dim);
-                   border-top:none;border-bottom-left-radius:var(--radius-lg);
-                   border-bottom-right-radius:var(--radius-lg);padding:14px;margin-bottom:2px">
-            <div style="margin-bottom:14px">
-              <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Tier Ladder</div>
-              ${KILL_TIERS.map(t => `
-                <div style="display:flex;align-items:center;gap:10px;padding:6px 0;
-                            border-bottom:1px solid rgba(196,169,106,0.07)">
-                  <span style="font-size:16px;min-width:32px">${t.icon}</span>
-                  <div style="flex:1">
-                    <div style="font-size:13px;font-weight:600;color:${pts>=t.pts?"var(--gold)":"var(--text-warm)"}">${t.name}</div>
-                  </div>
-                  <div style="font-size:12px;color:var(--text-muted)">${t.pts} pts</div>
-                  ${pts>=t.pts?`<span style="font-size:11px;color:var(--success)">✓</span>`:""}
-                </div>`).join("")}
-            </div>
-            <div>
-              <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Points Per Kill</div>
-              ${[["🦌 Buck Deer",10],["🦌 Doe Deer",5],["🦃 Turkey Tom",10],["🦃 Jake / Hen",5],
-                 ["🐻 Bear",15],["🦆 Waterfowl","2/bird"],["🐿️ Small Game","1/animal"],["🐺 Predator","3"]
-                ].map(([label,p])=>`
-                <div style="display:flex;justify-content:space-between;padding:5px 0;
-                            border-bottom:1px solid rgba(196,169,106,0.07)">
-                  <span style="font-size:13px;color:var(--text-muted)">${label}</span>
-                  <span style="font-size:13px;color:var(--gold);font-weight:600">${p}</span>
-                </div>`).join("")}
-            </div>
-          </div>
-        </div>` : ""}
-
-        <!-- Species breakdown -->
-        <div>
-          <button class="tc-row-header" id="breakdown-toggle"
-            onclick="toggleMyKillsSection('breakdown')" style="margin-bottom:0">
-            <span style="font-size:16px">📊</span>
-            <div style="flex:1;text-align:left">
-              <div style="font-size:14px;font-weight:600;color:var(--text-warm)">Kill Breakdown</div>
-              <div style="font-size:12px;color:var(--text-muted)">${kills} total harvest${kills!==1?"s":""}</div>
-            </div>
-            <span id="breakdown-arrow" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
-          </button>
-          <div id="breakdown-content" class="hidden"
-            style="background:rgba(14,10,4,0.92);border:1px solid var(--gold-dim);
-                   border-top:none;border-bottom-left-radius:var(--radius-lg);
-                   border-bottom-right-radius:var(--radius-lg);padding:14px;margin-bottom:2px">
-            ${Object.entries(breakdown).length === 0
-              ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic">No harvests logged yet.</div>`
-              : Object.entries(breakdown).map(([sp, count]) => {
-                  const info = speciesInfo(sp);
-                  return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;
-                                      border-bottom:1px solid rgba(196,169,106,0.07)">
-                    <span style="font-size:22px">${info.icon}</span>
-                    <div style="flex:1;font-size:14px;color:var(--text-warm)">${info.label}</div>
-                    <div style="font-size:15px;font-weight:700;color:var(--gold)">${count}</div>
-                  </div>`;
-                }).join("")}
+          <div id="troom-pts-content" class="hidden"
+            style="background:rgba(14,10,4,0.92);border:1px solid var(--gold-dim);border-top:none;
+                   border-bottom-left-radius:var(--radius-lg);border-bottom-right-radius:var(--radius-lg);padding:14px">
+            ${pointsReferenceHTML(pts)}
           </div>
         </div>
-
-        <!-- Harvest history -->
-        <div>
-          <div style="font-size:12px;color:var(--text-muted);letter-spacing:0.5px;
-                      text-transform:uppercase;margin-bottom:10px">
-            ${isOwn ? "Your Harvest History" : esc(viewName) + "'s Harvests"}
-          </div>
-          ${myKillsData.length === 0
-            ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:8px 0">${isOwn ? "No harvests logged yet — tag your first one from the Harvest Log." : "No harvests logged yet."}</div>`
-            : myKillsData.map(h => renderMyKillRow(h, isOwn)).join("")}
-        </div>
-
-      </div>
-    `;
-  } catch(err) {
+      </div>`;
+  } catch (err) {
     console.error(err);
     content.innerHTML = `
       <div style="padding:40px 24px;text-align:center;color:var(--text-muted)">
         <div style="font-size:36px;margin-bottom:10px">📡</div>
-        <div style="font-size:14px;margin-bottom:4px">Couldn't reach the kill log right now.</div>
+        <div style="font-size:14px;margin-bottom:4px">Couldn't load the Trophy Room right now.</div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">Check your connection and try again.</div>
-        <button class="btn btn-secondary btn-sm" onclick="renderMyKillsScreen()">Retry</button>
+        <button class="btn btn-secondary btn-sm" onclick="renderTrophyRoom()">Retry</button>
       </div>`;
   }
 };
+window.renderMyKillsScreen = window.renderTrophyRoom;   // legacy alias (stub list + goTo)
 
-function renderMyKillRow(h, isOwn) {
+window.refreshTrophyRoom = async function () {
+  try { await loadTrophyData(true); } catch (_) {}
+  renderTrophyRoom();
+};
+
+// ---- Master Trophy Room — camp hall of fame ----
+window.goMasterTrophyRoom = function () {
+  showScreen("screen-master-trophy");
+  renderMasterTrophyRoom();
+};
+
+window.renderMasterTrophyRoom = async function () {
+  const el = document.getElementById("master-trophy-content");
+  if (!el) return;
+  el.innerHTML = `<div style="padding:44px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>`;
+  try {
+    const cache = await loadTrophyData(false);
+    const stats = computeTrophyStats(cache);
+    const M  = cache.members;
+    const nm = uid => esc(M[uid]?.name || "—");
+
+    const row = (label, list, unit) => {
+      const first = list[0], second = list[1];
+      return `<div style="background:var(--forest-card);border:1px solid var(--card-border);
+                   border-radius:12px;padding:12px 14px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin-bottom:8px">${esc(label)}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:${second ? "5px" : "0"}">
+          <span style="font-size:15px">🏆</span>
+          <span style="flex:1;font-size:14px;font-weight:600;color:var(--gold);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${first ? nm(first.uid) : "—"}</span>
+          <span style="font-size:13px;color:var(--text-warm);flex-shrink:0">${first ? first.value + unit : ""}</span>
+        </div>
+        ${second ? `<div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:15px">🥈</span>
+          <span style="flex:1;font-size:13px;color:var(--text-muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${nm(second.uid)}</span>
+          <span style="font-size:12px;color:var(--text-dim);flex-shrink:0">${second.value + unit}</span>
+        </div>` : ""}
+      </div>`;
+    };
+
+    const cats = [
+      ["Most trophies",       stats.rankings.harvests,   ""],
+      ["Most bucks",          stats.rankings.bucks,      ""],
+      ["Most kill points",    stats.rankings.points,     " pts"],
+      ["Biggest buck",        stats.rankings.bestRack,   '"'],
+      ["Heaviest animal",     stats.rankings.heaviest,   " lbs"],
+      ["Most does",           stats.rankings.does,       ""],
+      ["Longest beard",       stats.rankings.beard,      '"'],
+      ["Longest spurs",       stats.rankings.spur,       '"'],
+      ["Best single season",  stats.rankings.bestSeason, ""]
+    ].filter(([, list]) => list.length);
+
+    const contestRows = [];
+    Object.entries(cache.contestMeta).forEach(([key, meta]) => {
+      if (!meta.closed) return;
+      const us = key.lastIndexOf("_");
+      const contest = key.slice(0, us), year = key.slice(us + 1);
+      const c = CONTESTS[contest];
+      const entries = cache.contestEntries
+        .filter(e => e.contest === contest && String(e.year) === year)
+        .map(e => ({ uid: e.uid, value: Number(e.measure) || 0 }))
+        .sort((a, b) => b.value - a.value);
+      if (entries.length) contestRows.push(row(`${c?.label || contest} · ${year}`, entries, c?.unit || ""));
+    });
+
+    el.innerHTML = `
+      <div style="padding:14px 16px 90px">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">
+          The champion and the runner-up in every category. Updates as members log harvests.
+        </div>
+        ${cats.length ? cats.map(([l, list, u]) => row(l, list, u)).join("")
+          : `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:20px 0;text-align:center">No harvests logged at camp yet.</div>`}
+        ${contestRows.length ? `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:18px 0 8px">Contest champions</div>${contestRows.join("")}` : ""}
+        <button class="btn btn-secondary btn-sm btn-full" style="margin-top:10px" onclick="goTo('screen-mykills')">← Your Trophy Room</button>
+      </div>`;
+  } catch (err) {
+    console.error(err);
+    el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">
+      <div style="font-size:14px;margin-bottom:12px">Couldn't load the camp board.</div>
+      <button class="btn btn-secondary btn-sm" onclick="renderMasterTrophyRoom()">Retry</button></div>`;
+  }
+};
+
+function renderTrophyEntry(h) {
   const sp      = speciesInfo(h.species);
   const dateStr = formatDate(h.harvestDate);
-  const isExp   = myKillsExpanded.has(h.id);
+  const isExp   = trophyExpanded.has(h.id);
 
   // Build stat pills based on species
   const stats = [];
@@ -5592,7 +6013,7 @@ function renderMyKillRow(h, isOwn) {
   return `
     <div style="margin-bottom:${isExp?"2":"8"}px">
       <button class="tc-row-header ${isExp?"expanded":""}"
-        onclick="toggleMyKillRow('${h.id}')" style="margin-bottom:0">
+        onclick="toggleTrophyEntry('${h.id}')" style="margin-bottom:0">
         <span style="font-size:28px;flex-shrink:0">${sp.icon}</span>
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600;color:var(--text-warm)">${sp.label}</div>
@@ -5624,49 +6045,30 @@ function renderMyKillRow(h, isOwn) {
             <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goHarvest()">
               View in Harvest Log
             </button>
-            ${isOwn ? `
-              <button class="btn btn-danger btn-sm" onclick="deleteHarvest('${h.id}')">
-                🗑
-              </button>` : ""}
+            <button class="btn btn-danger btn-sm" onclick="deleteHarvest('${h.id}')">
+              🗑
+            </button>
           </div>
         </div>` : ""}
     </div>`;
 }
 
-window.switchKillsView = function(uid) {
-  myKillsViewingUid = uid;
-  myKillsExpanded.clear();
-  myKillsData = [];
-  window.renderMyKillsScreen();
-};
-
-window.toggleMyKillsSection = function (section) {
-  const el     = document.getElementById(section + "-content");
-  const arrow  = document.getElementById(section + "-arrow");
-  const header = document.getElementById(section + "-toggle");
+window.toggleTrophySection = function (key) {
+  const el     = document.getElementById(key + "-content");
+  const arrow  = document.getElementById(key + "-arrow");
+  const header = document.getElementById(key + "-toggle");
   if (!el) return;
-  const isHidden = el.classList.contains("hidden");
-  el.classList.toggle("hidden", !isHidden);
-  if (arrow)  arrow.style.transform = isHidden ? "rotate(90deg)" : "";
-  if (header) header.classList.toggle("expanded", isHidden);
+  const opening = el.classList.contains("hidden");
+  el.classList.toggle("hidden", !opening);
+  if (arrow)  arrow.style.transform = opening ? "rotate(90deg)" : "";
+  if (header) header.classList.toggle("expanded", opening);
 };
 
-window.toggleMyKillRow = function (id) {
-  if (myKillsExpanded.has(id)) myKillsExpanded.delete(id);
-  else myKillsExpanded.add(id);
-  // Re-render just the history section without full Firestore re-fetch
-  const historyEl = document.querySelector("#mykills-content [style*='padding-bottom:80px'] > div:last-child");
-  if (historyEl && myKillsData.length > 0) {
-    const isOwn = (myKillsViewingUid || userProfile.uid) === userProfile.uid;
-    historyEl.innerHTML = `
-      <div style="font-size:12px;color:var(--text-muted);letter-spacing:0.5px;
-                  text-transform:uppercase;margin-bottom:10px">
-        ${isOwn ? "Your Harvest History" : "Harvest History"}
-      </div>
-      ${myKillsData.map(h => renderMyKillRow(h, isOwn)).join("")}`;
-  } else {
-    window.renderMyKillsScreen();
-  }
+window.toggleTrophyEntry = function (id) {
+  if (trophyExpanded.has(id)) trophyExpanded.delete(id);
+  else trophyExpanded.add(id);
+  const list = document.getElementById("troom-log-content");
+  if (list) list.innerHTML = trophyEntries.map(renderTrophyEntry).join("");
 };
 
 // Service worker is registered in registerServiceWorker() (called on DOMContentLoaded),

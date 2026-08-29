@@ -132,6 +132,8 @@
       <div class="back-bar">
         <button class="back-btn" onclick="goHome()">← Back</button>
         <span class="section-title" style="margin-left:8px">Harvest Log</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:12px;color:var(--gold)"
+          onclick="goTo('screen-mykills')">🏆 Trophy Room</button>
       </div>
       <div id="harvest-content"></div>
     </section>
@@ -199,13 +201,22 @@
       <div id="admin-content"></div>
     </section>
 
-    <!-- ── MY KILLS ──────────────────────────────────────────── -->
+    <!-- ── TROPHY ROOM ──────────────────────────────────────── -->
     <section class="screen" id="screen-mykills">
       <div class="back-bar">
         <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
-        <span class="section-title" style="margin-left:8px">My Kills</span>
+        <span class="section-title" style="margin-left:8px">Trophy Room</span>
       </div>
       <div id="mykills-content"></div>
+    </section>
+
+    <!-- ── MASTER TROPHY ROOM ───────────────────────────────── -->
+    <section class="screen" id="screen-master-trophy">
+      <div class="back-bar">
+        <button class="back-btn" onclick="closeDrawerAndGoHome()">← Back</button>
+        <span class="section-title" style="margin-left:8px">Master Trophy Room</span>
+      </div>
+      <div id="master-trophy-content"></div>
     </section>
 
     <!-- ── APP UPDATES ─────────────────────────────────────── -->
@@ -290,13 +301,16 @@
       <span class="di-icon">⚡</span> Admin Panel
     </button>
     <button class="drawer-item" onclick="goTo('screen-mykills')">
-      <span class="di-icon">🎯</span> My Kills
+      <span class="di-icon">🏆</span> Trophy Room
+    </button>
+    <button class="drawer-item" onclick="goTo('screen-master-trophy')">
+      <span class="di-icon">🏅</span> Master Trophy Room
     </button>
     <button class="drawer-item" onclick="goTo('screen-bylaws')">
       <span class="di-icon">📜</span> By-Laws
     </button>
     <button class="drawer-item" onclick="goTo('screen-contests')">
-      <span class="di-icon">🏆</span> Contests
+      <span class="di-icon">🎯</span> Contests
     </button>
     <button class="drawer-item" onclick="goTo('screen-settings')">
       <span class="di-icon">⚙️</span> Settings
@@ -379,7 +393,7 @@
       'saveProfileSettings','saveNotifPrefs','openChangeEmail','doChangeEmail',
       'openChangePassword','doChangePassword','sendResetEmail','clearAppCache',
       'submitAdminAction','submitBulletin','submitGuestKey','toggleChangelog',
-      'toggleLogEntry','toggleMyKillRow','toggleMyKillsSection','updateHarvestFields',
+      'toggleLogEntry','updateHarvestFields',
       'updateDeerFields','openPostBulletin','loadMoreFeed','toggleFeedComments',
       'toggleHarvestRow','openAddHarvest','openEditHarvest','deleteHarvest',
       'openAddTrailCam','toggleTcRow','openTcLightbox','closeTcLightbox',
@@ -399,7 +413,9 @@
       'openHarvestCompare','loadMoreFeed',
       'goCalendar','renderCalendarScreen','calPrevMonth','calNextMonth','openMapFull',
       'openCalendarDay','openAddCalendarVisit','saveCalendarVisit','deleteCalendarVisit',
-      'toggleHarvestReactPicker','switchKillsView','toggleMyKillRow',
+      'toggleHarvestReactPicker',
+      'renderTrophyRoom','refreshTrophyRoom','goMasterTrophyRoom','renderMasterTrophyRoom',
+      'toggleTrophySection','toggleTrophyEntry',
       'switchContestTab','openContestEntry','submitContestEntry','deleteContestEntry','toggleContestEntry',
       'closeContest','reopenContest'
     ];
