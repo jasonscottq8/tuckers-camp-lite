@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.9.0";
+const APP_VERSION = "lite-2.9.1";
 
 
 
@@ -633,7 +633,7 @@ function renderHomeScreen() {
     <div class="feature-grid">
       ${featureGridBtn("🦌", "Harvest Log",    "goHarvest()")}
       ${featureGridBtn("📷", "Trail Cam",      "goTrailCam()")}
-      ${featureGridBtn(miniCalIcon(), "Cabin Calendar", "goCalendar()")}
+      ${featureGridBtn(miniCalIcon(new Date(), 32), "Cabin Calendar", "goCalendar()")}
       ${featureGridBtn("💬", "Feed",            "goFeed()")}
     </div>
   `;
@@ -803,26 +803,137 @@ window.openMapFull = function () {
   const lb = document.createElement("div");
   lb.id = "map-lightbox";
   lb.style.cssText = "position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.97);" +
-                     "display:flex;flex-direction:column";
+                     "display:flex;flex-direction:column;overflow:hidden";
+  const btnStyle = "background:rgba(255,255,255,0.1);border:1px solid var(--card-border);" +
+                   "color:var(--text-warm);width:36px;height:36px;border-radius:50%;" +
+                   "font-size:20px;line-height:1;cursor:pointer;font-family:var(--font-sans);flex-shrink:0";
   lb.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;
-                padding:12px 16px;flex-shrink:0">
+                padding:12px 16px;flex-shrink:0;position:relative;z-index:2">
       <div style="font-family:var(--font-serif);font-size:16px;color:var(--gold)">Camp Map</div>
-      <button onclick="document.getElementById('map-lightbox').remove()"
-        style="background:rgba(255,255,255,0.1);border:1px solid var(--card-border);
-               color:var(--text-warm);width:36px;height:36px;border-radius:50%;
-               font-size:18px;cursor:pointer;font-family:var(--font-sans)">✕</button>
+      <div style="display:flex;gap:8px">
+        <button onclick="mapZoom(-1)" style="${btnStyle}">−</button>
+        <button onclick="mapZoom(1)" style="${btnStyle}">+</button>
+        <button onclick="document.getElementById('map-lightbox').remove()" style="${btnStyle};font-size:18px">✕</button>
+      </div>
     </div>
-    <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;
-                display:flex;align-items:flex-start;justify-content:center">
-      <img src="Images/cabinmap.jpg" alt="Tucker's Camp map"
-        style="width:180%;max-width:none;height:auto;display:block" />
+    <div id="map-vp" style="flex:1;position:relative;overflow:hidden;
+                            touch-action:none;cursor:grab;background:#000">
+      <img id="map-img" src="Images/cabinmap.jpg" alt="Tucker's Camp map" draggable="false"
+        style="position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;
+               user-select:none;-webkit-user-drag:none" />
     </div>
     <div style="flex-shrink:0;text-align:center;padding:8px;font-size:11px;color:var(--text-dim)">
-      Pinch to zoom · drag to pan
+      Drag to move in any direction · pinch, scroll or ± to zoom
     </div>`;
   document.body.appendChild(lb);
+  initMapPanZoom();
 };
+
+// Free pan + zoom for the full-screen map (drag in any direction, pinch/wheel/± to zoom).
+function initMapPanZoom() {
+  const vp  = document.getElementById("map-vp");
+  const img = document.getElementById("map-img");
+  if (!vp || !img) return;
+
+  let natW = 1, natH = 1, scale = 1, minScale = 1, x = 0, y = 0;
+  const pts = new Map();
+  let base = null;
+
+  const alive = () => document.body.contains(vp);
+
+  const clamp = () => {
+    const w = natW * scale, h = natH * scale;
+    const vw = vp.clientWidth, vh = vp.clientHeight;
+    x = w <= vw ? (vw - w) / 2 : Math.max(vw - w, Math.min(0, x));
+    y = h <= vh ? (vh - h) / 2 : Math.max(vh - h, Math.min(0, y));
+  };
+  const render = () => { clamp(); img.style.transform = `translate(${x}px,${y}px) scale(${scale})`; };
+
+  const fit = () => {
+    if (!alive()) { window.removeEventListener("resize", fit); return; }
+    const vw = vp.clientWidth, vh = vp.clientHeight;
+    minScale = Math.min(vw / natW, vh / natH) || 1;
+    scale = minScale; x = 0; y = 0; render();
+  };
+
+  const ready = () => {
+    natW = img.naturalWidth || 1200;
+    natH = img.naturalHeight || 900;
+    img.style.width = natW + "px";
+    img.style.height = natH + "px";
+    fit();
+  };
+  if (img.complete && img.naturalWidth) ready(); else img.onload = ready;
+
+  const zoomAt = (clientX, clientY, factor) => {
+    const ns = Math.max(minScale, Math.min(minScale * 10, scale * factor));
+    const r = vp.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top;
+    const k = ns / scale;
+    x = px - (px - x) * k;
+    y = py - (py - y) * k;
+    scale = ns;
+    render();
+  };
+
+  window.mapZoom = (dir) => {
+    const r = vp.getBoundingClientRect();
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, dir > 0 ? 1.5 : 1 / 1.5);
+  };
+
+  const snapshot = () => ({ x, y, scale, pts: [...pts.values()].map(p => ({ x: p.x, y: p.y })) });
+
+  vp.addEventListener("pointerdown", (e) => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    base = snapshot();
+    vp.style.cursor = "grabbing";
+    try { vp.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+
+  vp.addEventListener("pointermove", (e) => {
+    if (!pts.has(e.pointerId) || !base) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const cur = [...pts.values()];
+
+    if (cur.length === 1 && base.pts.length >= 1) {
+      x = base.x + (cur[0].x - base.pts[0].x);
+      y = base.y + (cur[0].y - base.pts[0].y);
+      render();
+    } else if (cur.length === 2 && base.pts.length === 2) {
+      const bd = Math.hypot(base.pts[0].x - base.pts[1].x, base.pts[0].y - base.pts[1].y) || 1;
+      const cd = Math.hypot(cur[0].x - cur[1].x, cur[0].y - cur[1].y);
+      const ns = Math.max(minScale, Math.min(minScale * 10, base.scale * (cd / bd)));
+      const r = vp.getBoundingClientRect();
+      const mx = (base.pts[0].x + base.pts[1].x) / 2 - r.left;
+      const my = (base.pts[0].y + base.pts[1].y) / 2 - r.top;
+      const k = ns / base.scale;
+      x = mx - (mx - base.x) * k;
+      y = my - (my - base.y) * k;
+      scale = ns;
+      render();
+    }
+  });
+
+  const endPointer = (e) => {
+    pts.delete(e.pointerId);
+    base = pts.size ? snapshot() : null;
+    if (!pts.size) vp.style.cursor = "grab";
+  };
+  vp.addEventListener("pointerup", endPointer);
+  vp.addEventListener("pointercancel", endPointer);
+
+  vp.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+  }, { passive: false });
+
+  vp.addEventListener("dblclick", (e) => {
+    zoomAt(e.clientX, e.clientY, scale > minScale * 1.4 ? minScale / scale : 2.5);
+  });
+
+  window.addEventListener("resize", fit);
+}
 
 // ============================================================
 // SETTINGS SCREEN — Basic (full build Step 10)
@@ -1157,6 +1268,10 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.9.1", date: "Aug 2026", notes: [
+      "Full-screen camp map now pans freely in every direction, with pinch / scroll / ± zoom",
+      "Quick Access tiles are all the same size"
+    ]},
     { version: "lite-2.9.0", date: "Aug 2026", notes: [
       "Big Buck & Big Doe contests — enter a photo and a measurement, board auto-ranks",
       "Contest leader gets the 🏆; edit or remove your own entry any time",
