@@ -1273,7 +1273,7 @@ function renderUpdatesScreen() {
   if (!el) return;
   const changelog = [
     { version: "lite-2.10.1", date: "Aug 2026", notes: [
-      "Renamed the rank tiers: Gold, Double Gold, Triple Gold, Diamond, Royal Distinction, Unknown Element",
+      "Renamed the rank tiers: Gold, Double Gold, Triple Gold, Diamond, Royal Description, Unknown Element",
       "Added a top tier — Elementa Infinitum 🌟 at 1000 points"
     ]},
     { version: "lite-2.10.0", date: "Aug 2026", notes: [
@@ -4766,7 +4766,7 @@ const KILL_TIERS = [
   { tier:2, name:"Double Gold",       icon:"⭐⭐",     pts:25,   msg:"You're getting out there. The woods are starting to notice." },
   { tier:3, name:"Triple Gold",       icon:"⭐⭐⭐",   pts:75,   msg:"That's a real body count. You know what you're doing out there." },
   { tier:4, name:"Diamond",           icon:"💎",       pts:150,  msg:"Straight up lethal. Most hunters never see numbers like this." },
-  { tier:5, name:"Royal Distinction", icon:"👑",       pts:300,  msg:"You are the apex predator at Tucker's Camp. Full stop." },
+  { tier:5, name:"Royal Description", icon:"👑",       pts:300,  msg:"You are the apex predator at Tucker's Camp. Full stop." },
   { tier:6, name:"Unknown Element",   icon:"☢️",      pts:600,  msg:"At this point you're a biological threat to the local wildlife population." },
   { tier:7, name:"Elementa Infinitum",icon:"🌟",       pts:1000, msg:"Beyond measurement. The apex has no ceiling." }
 ];
