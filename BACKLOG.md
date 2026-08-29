@@ -22,6 +22,17 @@ The next deep pass should be dedicated to these two themes, not features.
 - **Password policy is weak** — `doChangePassword` only requires 6 characters.
   Consider raising the minimum and/or enabling Firebase's built-in password
   policy + email-enumeration protection.
+- **Two-factor auth.** Priorities / cost (project is on Blaze, everything free
+  so far at ~12 users):
+  1. Turn on Google-account 2-step verification for the account that owns the
+     `tucker-s-camp` project — free, do first, protects the whole backend.
+  2. Optional member 2FA via Firebase Auth MFA. Enabling it upgrades the
+     project to Identity Platform (free tier 50k MAU, so free at our size, but
+     it's a semi-one-way door — do it deliberately in this sweep).
+     - TOTP / authenticator-app second factor: **free**, no per-use cost.
+     - SMS second factor: ~1–5¢ per text + needs abuse protection. Avoid unless
+       members won't use an authenticator app.
+     Recommend TOTP-only.
 - **Guest access model** needs a look — guest "sessions" are pure client-side
   `sessionStorage` with no Firebase auth, so a forged `role:'admin'` in
   sessionStorage would show the admin UI (writes would fail at the rules layer,
