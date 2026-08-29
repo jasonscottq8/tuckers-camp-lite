@@ -609,7 +609,7 @@ function renderHomeScreen() {
     <div class="feature-grid">
       ${featureGridBtn("🦌", "Harvest Log",    "goHarvest()")}
       ${featureGridBtn("📷", "Trail Cam",      "goTrailCam()")}
-      ${featureGridBtn("📅", "Cabin Calendar", "showScreen('screen-calendar')")}
+      ${featureGridBtn("📅", "Cabin Calendar", "goCalendar()")}
       ${featureGridBtn("💬", "Feed",            "goFeed()")}
     </div>
   `;
@@ -1458,6 +1458,8 @@ async function renderAdminContent(inner) {
 
 window.adminViewAllPosts = async function () {
   const snap = await getDocs(query(collection(db, "feed"), orderBy("createdAt","desc"), limit(30)));
+  _adminDocCache = {};
+  snap.docs.forEach(d => { _adminDocCache[d.id] = { id: d.id, ...d.data() }; });
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "admin-posts-overlay";
   ov.innerHTML = `
@@ -1477,7 +1479,7 @@ window.adminViewAllPosts = async function () {
           <div style="font-size:13px;color:var(--text-warm);margin-bottom:8px">
             ${p.text||"[auto event]"}
           </div>
-          <button class="btn btn-danger btn-sm" onclick="adminDeleteFeedPost('${d.id}','${(p.text||"").replace(/'/g,"\'")}','${p.memberName||"Unknown"}','${p.photoURL||""}')">
+          <button class="btn btn-danger btn-sm" onclick="adminDeleteFeedPost('${d.id}')">
             🗑 Delete
           </button>
         </div>`;
@@ -1487,6 +1489,10 @@ window.adminViewAllPosts = async function () {
 };
 
 window.adminDeleteFeedPost = function (id, text, memberName, photoUrl) {
+  if (text === undefined) {
+    const c = _adminDocCache[id] || {};
+    text = c.text || ""; memberName = c.memberName || "Unknown"; photoUrl = c.photoURL || "";
+  }
   const hasPhoto = !!photoUrl;
   requireReason(
     "Delete Feed Post",
@@ -1507,6 +1513,7 @@ window.adminDeleteFeedPost = function (id, text, memberName, photoUrl) {
 };
 
 window.adminDeleteHarvest = function (id, data) {
+  data = data || _adminDocCache[id] || {};
   const hasPhoto = !!data?.photoURL;
   const snapshot = `${data?.species||""} by ${data?.memberName||""} on ${formatDate(data?.harvestDate)}`;
   requireReason(
@@ -1528,6 +1535,7 @@ window.adminDeleteHarvest = function (id, data) {
 };
 
 window.adminDeleteTcPhoto = function (id, data) {
+  data = data || _adminDocCache[id] || {};
   const hasPhoto = !!data?.photoURL;
   requireReason(
     "Delete Trail Cam Photo",
@@ -1549,6 +1557,8 @@ window.adminDeleteTcPhoto = function (id, data) {
 
 async function renderAdminBulletins(inner) {
   const snap = await getDocs(query(collection(db, "bulletins"), orderBy("createdAt","desc")));
+  _adminDocCache = {};
+  snap.docs.forEach(d => { _adminDocCache[d.id] = { id: d.id, ...d.data() }; });
   inner.innerHTML = `
     <div style="margin-bottom:12px">
       <button class="btn btn-primary btn-full" onclick="adminPostBulletin()">
@@ -1568,7 +1578,7 @@ async function renderAdminBulletins(inner) {
               <button class="btn btn-secondary btn-sm" onclick="adminTogglePin('${d.id}',${!!b.pinned})">
                 ${b.pinned ? "📌 Unpin" : "📌 Pin"}
               </button>
-              <button class="btn btn-danger btn-sm" onclick="adminDeleteBulletin('${d.id}','${(b.text||"").replace(/'/g,"\'")}')">
+              <button class="btn btn-danger btn-sm" onclick="adminDeleteBulletin('${d.id}')">
                 🗑 Delete
               </button>
             </div>
@@ -1624,6 +1634,7 @@ window.adminTogglePin = async function (id, isPinned) {
 };
 
 window.adminDeleteBulletin = function (id, text) {
+  if (text === undefined) text = (_adminDocCache[id] || {}).text || "";
   requireReason(
     "Delete Bulletin",
     `Delete this bulletin?`,
@@ -1809,8 +1820,14 @@ window.toggleLogEntry = function (i) {
   if (header) header.classList.toggle("expanded", opening);
 };
 
+// Cache of docs shown in admin "view all" modals, so delete buttons can pass
+// just an id instead of trying to embed JSON in an onclick attribute.
+let _adminDocCache = {};
+
 async function renderAdminViewAllHarvests() {
   const snap = await getDocs(query(collection(db, "harvests"), orderBy("harvestDate","desc"), limit(50)));
+  _adminDocCache = {};
+  snap.docs.forEach(d => { _adminDocCache[d.id] = { id: d.id, ...d.data() }; });
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "admin-harvests-overlay";
   ov.innerHTML = `
@@ -1829,7 +1846,7 @@ async function renderAdminViewAllHarvests() {
             ${sp.icon} ${sp.label} · ${h.memberName} · ${formatDate(h.harvestDate)}
           </div>
           <button class="btn btn-danger btn-sm"
-            onclick="adminDeleteHarvest('${d.id}',${JSON.stringify(h).replace(/'/g,"\'")})">
+            onclick="adminDeleteHarvest('${d.id}')">
             🗑 Delete
           </button>
         </div>`;
@@ -1840,6 +1857,8 @@ async function renderAdminViewAllHarvests() {
 window.adminViewAllHarvests = renderAdminViewAllHarvests;
 window.adminViewAllTrailCam = async function () {
   const snap = await getDocs(query(collection(db, "trailcam"), orderBy("createdAt","desc"), limit(50)));
+  _adminDocCache = {};
+  snap.docs.forEach(d => { _adminDocCache[d.id] = { id: d.id, ...d.data() }; });
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "admin-tc-overlay";
   ov.innerHTML = `
@@ -1857,7 +1876,7 @@ window.adminViewAllTrailCam = async function () {
           <div style="padding:8px 10px;display:flex;align-items:center;justify-content:space-between">
             <div style="font-size:12px;color:var(--text-muted)">${tc.uploaderName} · ${formatDate(tc.capturedAt)}</div>
             <button class="btn btn-danger btn-sm"
-              onclick="adminDeleteTcPhoto('${d.id}',${JSON.stringify(tc).replace(/'/g,"\'")})">
+              onclick="adminDeleteTcPhoto('${d.id}')">
               🗑
             </button>
           </div>
@@ -3020,6 +3039,78 @@ function renderTcLightboxBody(tc) {
     </div>`;
 }
 
+// ── Lightbox helpers ─────────────────────────────────────────
+window.closeTcLightbox = function () {
+  document.getElementById("tc-lightbox")?.remove();
+  trailCamDetail = null;
+};
+
+function renderTcTagPills(tags, id) {
+  const tagged = new Set(tags || []);
+  return TC_ANIMALS.map(a => `
+    <button class="tc-tag-pill ${tagged.has(a.id) ? "tagged" : ""}"
+      onclick="toggleTcTag('${id}','${a.id}')">
+      ${a.icon} ${a.label}
+    </button>`).join("");
+}
+
+window.toggleTcTag = async function (id, animalId) {
+  if (!userProfile || userProfile.isGuest) { showToast("Sign in to tag photos.", "error"); return; }
+  try {
+    const ref2 = doc(db, "trailcam", id);
+    const snap = await getDoc(ref2);
+    if (!snap.exists()) return;
+    const tags = new Set(snap.data().animalTags || []);
+    if (tags.has(animalId)) tags.delete(animalId);
+    else tags.add(animalId);
+    const newTags = [...tags];
+    await updateDoc(ref2, { animalTags: newTags });
+    if (trailCamDetail && trailCamDetail.id === id) trailCamDetail.animalTags = newTags;
+    const list = document.getElementById("tc-tag-list");
+    if (list) list.innerHTML = renderTcTagPills(newTags, id);
+  } catch (err) { console.error(err); showToast("Could not update tags.", "error"); }
+};
+
+window.addTcReaction = async function (id, emoji) {
+  await addReaction(id, "trailcam", emoji);
+  const snap = await getDoc(doc(db, "trailcam", id));
+  const el   = document.getElementById("tc-lb-reactions");
+  if (el) el.innerHTML = renderReactionBadges(snap.data()?.reactions || {}, id, "trailcam");
+};
+
+window.submitTcComment = async function (id) {
+  if (!userProfile || userProfile.isGuest) return;
+  const input = document.getElementById("tc-lb-comment-input");
+  const text  = input?.value.trim();
+  if (!text) return;
+  try {
+    const ref2     = doc(db, "trailcam", id);
+    const snap     = await getDoc(ref2);
+    const comments = snap.data()?.comments || [];
+    comments.push({
+      uid: userProfile.uid, name: userProfile.displayName,
+      initials: userProfile.initials, color: userProfile.color,
+      text, createdAt: Date.now()
+    });
+    await updateDoc(ref2, { comments });
+    if (input) input.value = "";
+    const fresh = await getDoc(ref2);
+    const wrap  = document.getElementById("tc-lb-comments");
+    if (wrap) wrap.innerHTML = renderComments(fresh.data()?.comments || [], id, "trailcam");
+    showToast("Comment posted!", "success");
+  } catch (err) { console.error(err); showToast("Could not post comment.", "error"); }
+};
+
+window.deleteTcPhoto = function (id) {
+  appConfirm("Delete Photo", "Permanently delete this trail cam photo?", async () => {
+    try {
+      await deleteDoc(doc(db, "trailcam", id));
+      closeTcLightbox();
+      showToast("Photo deleted.", "success");
+    } catch (err) { console.error(err); showToast("Could not delete.", "error"); }
+  });
+};
+
 
 // ── Checkout functions ───────────────────────────────────────
 window.doCheckout = function () {
@@ -3713,6 +3804,11 @@ let calCurrentMonth = new Date().getMonth(); // 0-indexed
 let calVisitDocs    = {};  // { "YYYY-MM-DD": [visits] }
 let calUnsub        = null;
 
+window.goCalendar = function () {
+  showScreen("screen-calendar");
+  renderCalendarScreen();
+};
+
 window.renderCalendarScreen = async function () {
   const el = document.getElementById("calendar-content");
   if (!el) return;
@@ -4183,7 +4279,8 @@ window.renderCheckinButton = async function () {
 
   try {
     const snap     = await getDoc(doc(db, "users", userProfile.uid));
-    const lastCheckin = snap.data()?.lastCheckin?.toDate?.() || null;
+    const userData = snap.data() || {};
+    const lastCheckin = userData.lastCheckin?.toDate?.() || null;
     const now      = Date.now();
     const elapsed  = lastCheckin ? now - lastCheckin.getTime() : Infinity;
     const onCooldown = elapsed < CHECKIN_COOLDOWN_MS;
@@ -4243,16 +4340,16 @@ window.doCheckin = async function () {
       isCheckedIn: true
     });
 
-    // Log cabin visit to calendar
+    // Log cabin visit to calendar (schema must match the Cabin Calendar reader)
     await addDoc(collection(db, "visits"), {
-      uid:         userProfile.uid,
-      memberName:  userProfile.displayName,
-      initials:    userProfile.initials,
-      color:       userProfile.color,
-      date:        today,
-      notes:       "Checked in via app",
-      createdAt:   now,
-      isCheckin:   true
+      visitDate:        Timestamp.fromDate(new Date(today + "T12:00:00")),
+      uid:              userProfile.uid,
+      visitorName:      userProfile.displayName,
+      visitorInitials:  userProfile.initials,
+      visitorColor:     userProfile.color,
+      notes:            "Checked in via app",
+      createdAt:        now,
+      isCheckin:        true
     });
 
     // Post to feed
@@ -4311,7 +4408,7 @@ window.renderFeedScreen = function () {
     ${userProfile && !userProfile.isGuest ? `
       <div style="padding:12px 16px;border-bottom:1px solid var(--gold-dim)">
         <div style="display:flex;gap:10px;align-items:center">
-          <div class="avatar" style="background:${userProfile.color});
+          <div class="avatar" style="background:${userProfile.color};
                width:36px;height:36px;font-size:13px;flex-shrink:0">
             ${userProfile.initials}
           </div>
@@ -4941,15 +5038,6 @@ window.toggleMyKillRow = function (id) {
   }
 };
 
-
-// ============================================================
-// HOME SCREEN — Kill counter badge + check-in button wiring
-// Register service worker
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js")
-      .then(() => console.log("Service Worker registered"))
-      .catch((err) => console.log("SW registration failed:", err));
-  });
-}
+// Service worker is registered in registerServiceWorker() (called on DOMContentLoaded),
+// which also wires up update detection. No second registration needed here.
 
