@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.10.1";
+const APP_VERSION = "lite-2.11.0";
 
 
 
@@ -1272,6 +1272,11 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.11.0", date: "Aug 2026", notes: [
+      "Added Spring Turkey and Fall Turkey contests",
+      "Turkey entries are scored by the NWTF formula — weight + 2× beard + 10× spurs — and the app does the math",
+      "Contests are now grouped Deer / Turkey, with turkey in its own bronze colour"
+    ]},
     { version: "lite-2.10.1", date: "Aug 2026", notes: [
       "Renamed the rank tiers: Gold, Double Gold, Triple Gold, Diamond, Royal Description, Unknown Element",
       "Added a top tier — Elementa Infinitum 🌟 at 1000 points",
@@ -1460,15 +1465,44 @@ function renderBylawsScreen() {
 }
 
 // ============================================================
-// CONTESTS — Big Buck & Big Doe
-// Each entry: a photo, a measurement, and an optional note. The leaderboard
-// auto-ranks by measurement; whoever is on top is the current leader.
+// CONTESTS — Deer (Big Buck / Big Doe / Bow Buck) + Turkey (Spring / Fall)
+// Deer contests rank by a single number the hunter types in. Turkey contests
+// are scored by the NWTF formula: weight + 2×beard + 10×(both spurs).
 // ============================================================
 const CONTESTS = {
-  buck:    { label: "Big Buck", icon: "🦌", unit: '"',   measureLabel: "Gross antler score (inches)", ph: "e.g. 142.5", noun: "buck" },
-  doe:     { label: "Big Doe",  icon: "🦌", unit: " lbs", measureLabel: "Field-dressed weight (lbs)",  ph: "e.g. 135",   noun: "doe" },
-  bowbuck: { label: "Bow Buck", icon: "🏹", unit: '"',   measureLabel: "Gross antler score (inches)", ph: "e.g. 138",   noun: "buck" }
+  buck:         { label: "Big Buck", short: "Buck", icon: "🦌", group: "deer",   unit: '"',   scoring: "single",
+                  measureLabel: "Gross antler score (inches)", ph: "e.g. 142.5", noun: "buck" },
+  doe:          { label: "Big Doe",  short: "Doe",  icon: "🦌", group: "deer",   unit: ' lbs', scoring: "single",
+                  measureLabel: "Field-dressed weight (lbs)", ph: "e.g. 135", noun: "doe" },
+  bowbuck:      { label: "Bow Buck", short: "Bow",  icon: "🏹", group: "deer",   unit: '"',   scoring: "single",
+                  measureLabel: "Gross antler score (inches)", ph: "e.g. 138", noun: "buck" },
+  springturkey: { label: "Spring Turkey", short: "Spring", icon: "🦃", group: "turkey", unit: "", scoring: "turkey",
+                  noun: "turkey", seasonNote: "Bearded birds — beard and spurs push the score up." },
+  fallturkey:   { label: "Fall Turkey",   short: "Fall",   icon: "🦃", group: "turkey", unit: "", scoring: "turkey",
+                  noun: "turkey", seasonNote: "Either sex — a hen just scores her weight." }
 };
+const CONTEST_GROUPS = {
+  deer:   { label: "Deer",   icon: "🦌", tabs: ["buck", "doe", "bowbuck"],
+            accent: "linear-gradient(135deg,var(--orange),var(--orange-bright))" },
+  turkey: { label: "Turkey", icon: "🦃", tabs: ["springturkey", "fallturkey"],
+            accent: "linear-gradient(135deg,#8a6d3b,#b28a44)" }
+};
+
+// NWTF wild-turkey score: weight(lb) + 2×beard + 10×(spurL + spurR)
+function nwtfScore(o) {
+  const w = Number(o.weight) || 0, b = Number(o.beard) || 0;
+  const s = (Number(o.spurL) || 0) + (Number(o.spurR) || 0);
+  return Math.round((w + 2 * b + 10 * s) * 100) / 100;
+}
+// How a contest value reads on the board / feed / trophy rooms
+function contestValueStr(contestId, v) {
+  const c = CONTESTS[contestId];
+  const n = Number(v) || 0;
+  return c && c.scoring === "turkey" ? n.toFixed(1) + " NWTF" : n + (c ? c.unit : "");
+}
+function contestGroupOf(id) { return (CONTESTS[id] && CONTESTS[id].group) || "deer"; }
+function contestAccent() { return CONTEST_GROUPS[contestGroupOf(contestTab)].accent; }
+
 let contestTab        = "buck";
 let contestUnsub      = null;
 let contestMetaUnsub  = null;
@@ -1483,13 +1517,33 @@ function contestMetaId() { return contestTab + "_" + contestYear(); }
 function renderContestsScreen() {
   const el = document.getElementById("contests-content");
   if (!el) return;
+  const group = contestGroupOf(contestTab);
+  const groupBtn = (gid, g) => `
+    <button onclick="switchContestGroup('${gid}')"
+      style="flex:1;padding:8px 4px;border-radius:var(--radius-md);font-size:13px;font-weight:700;
+             font-family:var(--font-sans);cursor:pointer;border:1px solid var(--card-border);
+             ${group === gid ? `background:${g.accent};border-color:transparent;color:#fff`
+                             : "background:rgba(255,255,255,0.05);color:var(--text-muted)"}">
+      ${g.icon} ${g.label}</button>`;
+  const c = CONTESTS[contestTab];
   el.innerHTML = `
-    <div style="padding:12px 16px 6px;display:flex;gap:6px">
-      ${Object.entries(CONTESTS).map(([id, c]) => `
-        <button class="harvest-filter-btn ${contestTab === id ? "active" : ""}"
-          onclick="switchContestTab('${id}')" style="flex:1;padding:6px 4px">${c.icon} ${c.label}</button>`).join("")}
+    <div style="padding:12px 16px 8px;display:flex;gap:8px">
+      ${Object.entries(CONTEST_GROUPS).map(([gid, g]) => groupBtn(gid, g)).join("")}
     </div>
-    <div style="padding:2px 16px 0;font-size:12px;color:var(--text-muted)">${contestYear()} Season</div>
+    <div style="padding:0 16px 6px;display:flex;gap:6px">
+      ${CONTEST_GROUPS[group].tabs.map(id => {
+        const t = CONTESTS[id];
+        return `<button onclick="switchContestTab('${id}')"
+          style="flex:1;padding:6px 4px;border-radius:20px;font-size:12px;font-weight:600;
+                 font-family:var(--font-sans);cursor:pointer;
+                 ${contestTab === id ? `background:${CONTEST_GROUPS[group].accent};border:1px solid transparent;color:#fff`
+                                     : "background:rgba(255,255,255,0.06);border:1px solid var(--card-border);color:var(--text-muted)"}">
+          ${t.icon} ${t.short}</button>`;
+      }).join("")}
+    </div>
+    <div style="padding:2px 16px 0;font-size:12px;color:var(--text-muted)">
+      ${contestYear()} season${c.seasonNote ? ` · ${esc(c.seasonNote)}` : ""}
+    </div>
     <div class="fade-divider-plain"></div>
     <div id="contest-board" style="padding:8px 16px 90px">
       <div style="text-align:center;padding:32px 0;color:var(--text-muted)">
@@ -1498,6 +1552,12 @@ function renderContestsScreen() {
     </div>`;
   loadContestEntries();
 }
+
+window.switchContestGroup = function (gid) {
+  if (!CONTEST_GROUPS[gid]) return;
+  if (contestGroupOf(contestTab) === gid) return;
+  switchContestTab(CONTEST_GROUPS[gid].tabs[0]);
+};
 
 window.switchContestTab = function (id) {
   if (!CONTESTS[id]) return;
@@ -1546,7 +1606,8 @@ function renderContestBoard() {
   const canEnter = userProfile && !userProfile.isGuest && !isClosed;
 
   const enterBtn = canEnter
-    ? `<button class="btn btn-primary btn-full" onclick="openContestEntry()" style="margin-top:14px">
+    ? `<button class="btn btn-full" onclick="openContestEntry()"
+         style="margin-top:14px;background:${contestAccent()};border:none;color:#fff;font-weight:700">
          ${c.icon} Enter ${esc(c.label)}
        </button>`
     : "";
@@ -1563,9 +1624,10 @@ function renderContestBoard() {
         : ""));
 
   // Closed banner with the crowned winner
+  const isTurkey = c.scoring === "turkey";
   const banner = (isClosed && contestMeta)
-    ? `<div style="background:linear-gradient(135deg,rgba(196,169,106,0.18),rgba(212,98,42,0.12));
-                   border:1px solid var(--gold-dim);border-radius:var(--radius-lg);
+    ? `<div style="background:${isTurkey ? "linear-gradient(135deg,rgba(138,109,59,0.22),rgba(178,138,68,0.12))" : "linear-gradient(135deg,rgba(196,169,106,0.18),rgba(212,98,42,0.12))"};
+                   border:1px solid ${isTurkey ? "#8a6d3b" : "var(--gold-dim)"};border-radius:var(--radius-lg);
                    padding:14px;margin-bottom:14px;text-align:center">
          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">
            ${contestYear()} ${esc(c.label)} — Season Closed
@@ -1573,7 +1635,7 @@ function renderContestBoard() {
          <div style="font-size:34px;margin:6px 0 2px">🏆</div>
          <div style="font-size:16px;font-weight:700;color:var(--gold)">${esc(contestMeta.winnerName || "—")}</div>
          ${contestMeta.winnerMeasure != null
-           ? `<div style="font-size:13px;color:var(--text-warm)">${esc((Number(contestMeta.winnerMeasure) || 0) + c.unit)}</div>` : ""}
+           ? `<div style="font-size:13px;color:var(--text-warm)">${esc(contestValueStr(contestTab, contestMeta.winnerMeasure))}</div>` : ""}
        </div>`
     : "";
 
@@ -1597,7 +1659,12 @@ function renderContestBoard() {
     const canEdit = isOwner && !isClosed;
     const rank    = i + 1;
     const medal   = rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
-    const measure = (Number(e.measure) || 0) + c.unit;
+    const measure = contestValueStr(contestTab, e.measure);
+    const breakdown = (isTurkey && e.weight)
+      ? `<div style="display:inline-block;background:rgba(138,109,59,0.15);border:1px solid #8a6d3b;
+                     border-radius:20px;padding:4px 10px;font-size:11px;color:var(--gold);margin-bottom:10px">
+           ${Number(e.weight)} lb · ${Number(e.beard) || 0}" beard · ${Number(e.spurL) || 0}"/${Number(e.spurR) || 0}" spurs
+         </div>` : "";
     return `
       <div style="margin-bottom:${isExp ? "0" : "10px"}">
         <button class="harvest-row-header ${isExp ? "expanded" : ""}" onclick="toggleContestEntry('${e.id}')">
@@ -1616,6 +1683,7 @@ function renderContestBoard() {
         </button>
         ${isExp ? `
           <div class="harvest-detail-panel">
+            ${breakdown}
             ${e.photoURL ? `<img src="${esc(e.photoURL)}"
               style="width:100%;border-radius:var(--radius-md);border:1px solid var(--card-border);
                      margin-bottom:10px;display:block" />` : ""}
@@ -1640,7 +1708,7 @@ window.closeContest = function () {
   if (!winner) { showToast("No entries to crown yet.", "error"); return; }
   appConfirm(
     "End the Season",
-    `Close the ${contestYear()} ${c.label} contest? ${winner.memberName} takes it with ${(Number(winner.measure) || 0) + c.unit}. No new entries after this — you can reopen it later.`,
+    `Close the ${contestYear()} ${c.label} contest? ${winner.memberName} takes it with ${contestValueStr(contestTab, winner.measure)}. No new entries after this — you can reopen it later.`,
     async () => {
       try {
         await setDoc(doc(db, "contestMeta", contestMetaId()), {
@@ -1659,7 +1727,7 @@ window.closeContest = function () {
           winnerName:   winner.memberName || "A member",
           contestLabel: c.label,
           year:         contestYear(),
-          measure:      (Number(winner.measure) || 0) + c.unit
+          measure:      contestValueStr(contestTab, winner.measure)
         });
         showToast(`${c.label} season closed — 🏆 ${winner.memberName}`, "success");
       } catch (err) { console.error(err); showToast("Could not close the season.", "error"); }
@@ -1690,14 +1758,35 @@ window.openContestEntry = function (id) {
   const e    = id ? contestEntries.find(x => x.id === id) || {} : {};
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "contest-entry-overlay";
+  const num = (id, label, val, ph) => `
+    <div class="input-group" style="margin-bottom:0">
+      <label style="font-size:11px">${label}</label>
+      <input type="number" id="${id}" inputmode="decimal" step="0.0625" min="0"
+        placeholder="${ph}" value="${val != null ? esc(val) : ""}" oninput="updateContestScore()" />
+    </div>`;
+  const scoreBlock = c.scoring === "turkey"
+    ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+         ${num("ct-weight", "Weight (lbs) *", e.weight, "21.5")}
+         ${num("ct-beard",  "Beard length (in)", e.beard, "10")}
+         ${num("ct-spurl",  "Left spur (in)", e.spurL, "1.25")}
+         ${num("ct-spurr",  "Right spur (in)", e.spurR, "1.25")}
+       </div>
+       <div style="background:rgba(138,109,59,0.12);border:1px solid #8a6d3b;border-radius:var(--radius-md);
+                   padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+         <span style="font-size:12px;color:var(--text-muted)">NWTF score</span>
+         <span id="contest-score" style="font-size:18px;font-weight:700;color:var(--gold)">
+           ${e.measure != null ? Number(e.measure).toFixed(1) : "0.0"}</span>
+       </div>
+       <div style="font-size:10px;color:var(--text-dim);margin-bottom:14px">weight + 2 × beard + 10 × both spurs</div>`
+    : `<div class="input-group" style="margin-bottom:12px">
+         <label>${esc(c.measureLabel)}</label>
+         <input type="number" id="contest-measure" inputmode="decimal" step="0.1" min="0"
+           placeholder="${esc(c.ph)}" value="${e.measure != null ? esc(e.measure) : ""}" />
+       </div>`;
   ov.innerHTML = `
     <div class="modal-box" style="max-width:360px;max-height:90vh;overflow-y:auto">
       <div class="modal-title">${c.icon} ${editingContestId ? "Edit Entry" : "Enter " + esc(c.label)}</div>
-      <div class="input-group" style="margin-bottom:12px">
-        <label>${esc(c.measureLabel)}</label>
-        <input type="number" id="contest-measure" inputmode="decimal" step="0.1" min="0"
-          placeholder="${esc(c.ph)}" value="${e.measure != null ? esc(e.measure) : ""}" />
-      </div>
+      ${scoreBlock}
       <div class="input-group" style="margin-bottom:12px">
         <label>Notes (optional)</label>
         <textarea id="contest-caption" maxlength="240"
@@ -1725,16 +1814,40 @@ window.openContestEntry = function (id) {
   document.body.appendChild(ov);
 };
 
+window.updateContestScore = function () {
+  const el = document.getElementById("contest-score");
+  if (!el) return;
+  el.textContent = nwtfScore({
+    weight: document.getElementById("ct-weight")?.value,
+    beard:  document.getElementById("ct-beard")?.value,
+    spurL:  document.getElementById("ct-spurl")?.value,
+    spurR:  document.getElementById("ct-spurr")?.value
+  }).toFixed(1);
+};
+
 window.submitContestEntry = async function () {
   if (!userProfile || userProfile.isGuest) return;
   if (contestMeta?.closed) { showToast("This season is closed.", "error"); return; }
-  const measure = parseFloat(document.getElementById("contest-measure")?.value);
+  const cfg = CONTESTS[contestTab];
+  let measure, turkeyFields = null;
+  if (cfg.scoring === "turkey") {
+    turkeyFields = {
+      weight: parseFloat(document.getElementById("ct-weight")?.value) || 0,
+      beard:  parseFloat(document.getElementById("ct-beard")?.value)  || 0,
+      spurL:  parseFloat(document.getElementById("ct-spurl")?.value)  || 0,
+      spurR:  parseFloat(document.getElementById("ct-spurr")?.value)  || 0
+    };
+    if (!(turkeyFields.weight > 0)) { showToast("Enter the bird's weight.", "error"); return; }
+    measure = nwtfScore(turkeyFields);
+  } else {
+    measure = parseFloat(document.getElementById("contest-measure")?.value);
+  }
   const caption = document.getElementById("contest-caption")?.value.trim() || "";
   const file    = document.getElementById("contest-photo")?.files?.[0] || null;
   const btn     = document.getElementById("contest-submit-btn");
   const existing = editingContestId ? contestEntries.find(x => x.id === editingContestId) : null;
 
-  if (!(measure > 0)) { showToast("Enter a measurement.", "error"); return; }
+  if (!(measure > 0)) { showToast(cfg.scoring === "turkey" ? "Fill in the bird's measurements." : "Enter a measurement.", "error"); return; }
   if (!file && !existing?.photoURL) { showToast(`Add a photo of your ${CONTESTS[contestTab].noun}.`, "error"); return; }
   if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
@@ -1762,6 +1875,7 @@ window.submitContestEntry = async function () {
       color:      userProfile.color,
       updatedAt:  serverTimestamp()
     };
+    if (turkeyFields) Object.assign(payload, turkeyFields, { scoring: "turkey" });
 
     if (editingContestId) {
       await updateDoc(doc(db, "contestEntries", editingContestId), payload);
@@ -5778,14 +5892,26 @@ window.renderTrophyRoom = async function () {
       chart: "", context: trophyContextLine(dRank, "", M), badges: []
     });
 
-    // Longest beard (only surface if there's turkey data anywhere)
-    if (stats.rankings.beard.length || me.longestBeard) {
+    // Turkey badges (spring + fall contest placements)
+    const turkeyBadges = (stats.placements[uid] || [])
+      .filter(p => p.contest === "springturkey" || p.contest === "fallturkey")
+      .map(p => ({
+        icon: p.place === 1 ? "🏆" : p.place === 2 ? "🥈" : "🥉",
+        text: (p.place === 1 ? "Won " : p.place === 2 ? "Runner-up, " : "3rd, ") + p.label + " " + p.year
+              + (p.place === 1 ? "" : " (" + p.measure + ")"),
+        strong: p.place === 1
+      }));
+
+    // Longest beard — surface if there's beard data anywhere, or the member
+    // has a turkey contest placement (a weight-only hen won't have beard data)
+    if (stats.rankings.beard.length || me.longestBeard || turkeyBadges.length) {
       const beardRank = rankOf(stats.rankings.beard);
       cards.push({
-        _rank: beardRank ? beardRank.pos : 90, hasData: me.longestBeard > 0, title: "Longest beard",
-        rank: beardRank, trophy: !!(beardRank && beardRank.pos === 1),
-        value: me.longestBeard ? me.longestBeard + '"' : "—", sub: "turkey",
-        chart: "", context: trophyContextLine(beardRank, '"', M), badges: []
+        _rank: beardRank ? beardRank.pos : 65, hasData: me.longestBeard > 0 || turkeyBadges.length > 0,
+        title: "Turkey", rank: beardRank, trophy: !!(beardRank && beardRank.pos === 1),
+        value: me.longestBeard ? me.longestBeard + '" beard' : (turkeyBadges.length ? "🦃" : "—"),
+        sub: me.longestBeard ? "your longest" : "",
+        chart: "", context: trophyContextLine(beardRank, '"', M), badges: turkeyBadges
       });
     }
     if (stats.rankings.spur.length || me.longestSpur) {
@@ -5937,7 +6063,8 @@ window.renderMasterTrophyRoom = async function () {
     const M  = cache.members;
     const nm = uid => esc(M[uid]?.name || "—");
 
-    const row = (label, list, unit) => {
+    const row = (label, list, unit, fmt) => {
+      const f = fmt || (v => v + unit);
       const first = list[0], second = list[1];
       return `<div style="background:var(--forest-card);border:1px solid var(--card-border);
                    border-radius:12px;padding:12px 14px;margin-bottom:10px">
@@ -5945,12 +6072,12 @@ window.renderMasterTrophyRoom = async function () {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:${second ? "5px" : "0"}">
           <span style="font-size:15px">🏆</span>
           <span style="flex:1;font-size:14px;font-weight:600;color:var(--gold);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${first ? nm(first.uid) : "—"}</span>
-          <span style="font-size:13px;color:var(--text-warm);flex-shrink:0">${first ? first.value + unit : ""}</span>
+          <span style="font-size:13px;color:var(--text-warm);flex-shrink:0">${first ? esc(f(first.value)) : ""}</span>
         </div>
         ${second ? `<div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:15px">🥈</span>
           <span style="flex:1;font-size:13px;color:var(--text-muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${nm(second.uid)}</span>
-          <span style="font-size:12px;color:var(--text-dim);flex-shrink:0">${second.value + unit}</span>
+          <span style="font-size:12px;color:var(--text-dim);flex-shrink:0">${esc(f(second.value))}</span>
         </div>` : ""}
       </div>`;
     };
@@ -5977,7 +6104,7 @@ window.renderMasterTrophyRoom = async function () {
         .filter(e => e.contest === contest && String(e.year) === year)
         .map(e => ({ uid: e.uid, value: Number(e.measure) || 0 }))
         .sort((a, b) => b.value - a.value);
-      if (entries.length) contestRows.push(row(`${c?.label || contest} · ${year}`, entries, c?.unit || ""));
+      if (entries.length) contestRows.push(row(`${c?.label || contest} · ${year}`, entries, "", v => contestValueStr(contest, v)));
     });
 
     el.innerHTML = `
