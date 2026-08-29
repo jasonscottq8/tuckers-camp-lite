@@ -1274,14 +1274,15 @@ function renderUpdatesScreen() {
   const changelog = [
     { version: "lite-2.10.1", date: "Aug 2026", notes: [
       "Renamed the rank tiers: Gold, Double Gold, Triple Gold, Diamond, Royal Description, Unknown Element",
-      "Added a top tier — Elementa Infinitum 🌟 at 1000 points"
+      "Added a top tier — Elementa Infinitum 🌟 at 1000 points",
+      "The two trophy screens are now My Trophy Room and Cabin Trophy Room"
     ]},
     { version: "lite-2.10.0", date: "Aug 2026", notes: [
-      "Renamed My Kills to the Trophy Room",
-      "Trophy Room now shows a stat card per category — camp ranking, by-year charts, and award badges",
-      "Added the Master Trophy Room: the champion and runner-up in every category",
+      "Renamed My Kills to My Trophy Room",
+      "My Trophy Room now shows a stat card per category — camp ranking, by-year charts, and award badges",
+      "Added the Cabin Trophy Room: the champion and runner-up in every category",
       "Contest wins and biggest-of-the-year now appear as badges on your stat cards",
-      "The harvest form links straight to the Trophy Room; a confirmation appears after logging",
+      "The harvest form links straight to My Trophy Room; a confirmation appears after logging",
       "Header counter now reads 🏆 with your trophy count"
     ]},
     { version: "lite-2.9.3", date: "Aug 2026", notes: [
@@ -2983,7 +2984,7 @@ function showHarvestForm(data) {
       <div class="modal-title">${editingHarvestId ? "Edit Harvest" : "Log Harvest"}</div>
       <button type="button" onclick="closeHarvestForm();goTo('screen-mykills')"
         style="background:none;border:none;color:var(--gold);font-size:12px;cursor:pointer;
-               padding:0;margin:0 0 12px;font-family:var(--font-sans)">🏆 View your Trophy Room →</button>
+               padding:0;margin:0 0 12px;font-family:var(--font-sans)">🏆 View My Trophy Room →</button>
 
       <div class="input-group" style="margin-bottom:12px">
         <label>Species</label>
@@ -3291,7 +3292,7 @@ function trophyAddedPrompt() {
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn btn-primary btn-full btn-sm"
           onclick="document.getElementById('trophy-added-overlay').remove();goTo('screen-mykills')">
-          See it in the Trophy Room
+          See it in My Trophy Room
         </button>
         <button class="btn btn-secondary btn-full btn-sm"
           onclick="document.getElementById('trophy-added-overlay').remove()">Done</button>
@@ -5417,7 +5418,7 @@ window.submitFeedPost = async function () {
 // ============================================================
 // TROPHY ROOM  (was "My Kills")
 // A stats drop-off: every harvest is a trophy, the room accumulates the
-// numbers. Personal stat-card feed + a camp-wide "Master Trophy Room".
+// numbers. "My Trophy Room" (personal stat feed) + "Cabin Trophy Room" (camp hall of fame).
 // ============================================================
 
 let trophyExpanded = new Set();   // harvest-log row ids that are open
@@ -5861,7 +5862,7 @@ window.renderTrophyRoom = async function () {
 
         <div style="display:flex;gap:8px;margin-bottom:16px">
           <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goHarvest()">🦌 Harvest log</button>
-          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goMasterTrophyRoom()">🏆 Camp board</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goMasterTrophyRoom()">🏅 Cabin Trophy Room</button>
         </div>
 
         ${me.harvests ? cards.map(trophyStatCard).join("") : `
@@ -5907,7 +5908,7 @@ window.renderTrophyRoom = async function () {
     content.innerHTML = `
       <div style="padding:40px 24px;text-align:center;color:var(--text-muted)">
         <div style="font-size:36px;margin-bottom:10px">📡</div>
-        <div style="font-size:14px;margin-bottom:4px">Couldn't load the Trophy Room right now.</div>
+        <div style="font-size:14px;margin-bottom:4px">Couldn't load your Trophy Room right now.</div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">Check your connection and try again.</div>
         <button class="btn btn-secondary btn-sm" onclick="renderTrophyRoom()">Retry</button>
       </div>`;
@@ -5920,7 +5921,7 @@ window.refreshTrophyRoom = async function () {
   renderTrophyRoom();
 };
 
-// ---- Master Trophy Room — camp hall of fame ----
+// ---- Cabin Trophy Room — camp hall of fame ----
 window.goMasterTrophyRoom = function () {
   showScreen("screen-master-trophy");
   renderMasterTrophyRoom();
@@ -5987,12 +5988,12 @@ window.renderMasterTrophyRoom = async function () {
         ${cats.length ? cats.map(([l, list, u]) => row(l, list, u)).join("")
           : `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:20px 0;text-align:center">No harvests logged at camp yet.</div>`}
         ${contestRows.length ? `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:18px 0 8px">Contest champions</div>${contestRows.join("")}` : ""}
-        <button class="btn btn-secondary btn-sm btn-full" style="margin-top:10px" onclick="goTo('screen-mykills')">← Your Trophy Room</button>
+        <button class="btn btn-secondary btn-sm btn-full" style="margin-top:10px" onclick="goTo('screen-mykills')">← My Trophy Room</button>
       </div>`;
   } catch (err) {
     console.error(err);
     el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">
-      <div style="font-size:14px;margin-bottom:12px">Couldn't load the camp board.</div>
+      <div style="font-size:14px;margin-bottom:12px">Couldn't load the Cabin Trophy Room.</div>
       <button class="btn btn-secondary btn-sm" onclick="renderMasterTrophyRoom()">Retry</button></div>`;
   }
 };
