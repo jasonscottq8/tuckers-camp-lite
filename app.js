@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.7.0";
+const APP_VERSION = "lite-2.8.0";
 
 
 
@@ -561,14 +561,14 @@ window.fabAction = function () {
     case "screen-harvest":  openAddHarvest();  break;
     case "screen-trailcam": openAddTrailCam(); break;
     case "screen-feed":     openAddPost();     break;
-    case "screen-calendar": openAddVisit();    break;
+    case "screen-calendar": openAddVisit(); break;
   }
 };
 
 // Stubs — filled in as steps complete
 // openAddTrailCam defined in Trail Cam module below
 function openAddPost()     { openFeedCompose(); }
-function openAddVisit()    { showToast("Cabin Calendar — coming in Step 7"); }
+function openAddVisit()    { openAddCalendarVisit(); }
 
 // ============================================================
 // NOTIFICATIONS
@@ -578,7 +578,7 @@ window.openNotifications = function () {
   document.getElementById("notifications-content").innerHTML = `
     <div style="padding:32px 16px;text-align:center;color:var(--text-muted)">
       <div style="font-size:36px;margin-bottom:12px">🔔</div>
-      <div>Notifications — coming in Step 11</div>
+      <div>Coming soon — stay tuned.</div>
     </div>
   `;
 };
@@ -736,7 +736,7 @@ function windDir(deg) {
 function renderMapScreen() {
   document.getElementById("map-content").innerHTML = `
     <div style="padding:16px;color:var(--text-muted);font-size:13px">
-      Map embed — coming in Step 9
+      Map coming soon.
     </div>
   `;
 }
@@ -1074,6 +1074,17 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.8.0", date: "May 2026", notes: [
+      "Cabin Calendar — full month grid view with visit logging",
+      "Tap any day to see who visited and log your own visit with notes",
+      "Member avatar dots on visited days show who's been at the cabin",
+      "This Month's Visits list below calendar — with delete option",
+      "Month navigation — browse any past or future month",
+      "Feed increased to 20 posts before Load More",
+      "Harvest photo reactions moved behind 😊 React button — cleaner scroll",
+      "Compare to Trail Cam back button now returns to Harvest Log directly",
+      "Removed developer placeholder text from all screens"
+    ]},
     { version: "lite-2.5.0", date: "May 2026", notes: [
       "Update system overhaul — service worker now updates immediately on every deploy",
       "Fixed persistent caching issue that prevented app updates from reaching users",
@@ -1157,7 +1168,7 @@ function renderUpdatesScreen() {
             onclick="toggleChangelog(${i})" style="margin-bottom:0">
             <div style="flex:1;text-align:left">
               <div style="font-size:14px;font-weight:600;color:${i===0?"var(--gold)":"var(--text-warm)"}">
-                ${v.version} ${i===0?"<span style='font-size:10px;background:var(--orange);color:#fff;padding:2px 7px;border-radius:10px;margin-left:6px'>CURRENT</span>":''}
+                ${v.version} ${i===0?"":''}
               </div>
               <div style="font-size:12px;color:var(--text-muted)">${v.date}</div>
             </div>
@@ -2088,25 +2099,24 @@ function renderHarvestDetailInline(h) {
           </button>
         </div>` : ""}
 
-      <!-- Reactions -->
-      <div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;
-                    letter-spacing:0.5px;text-transform:uppercase">Reactions</div>
-        <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px"
-             id="reactions-display-${id}">
+      <!-- Reactions compact -->
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1" id="reactions-display-${id}">
           ${renderReactionBadges(reactions, id, "harvests")}
         </div>
         ${userProfile && !userProfile.isGuest ? `
-          <div style="display:flex;flex-wrap:wrap;gap:5px">
-            ${REACTIONS_LIST.map(e => `
-              <button onclick="addHarvestReaction(\'${id}\',\'${e}\')"
-                style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
-                       border-radius:20px;padding:4px 9px;font-size:14px;cursor:pointer;
-                       transition:all 0.2s;font-family:var(--font-sans)"
-                onmouseover="this.style.borderColor=\'var(--gold-dim)\'"
-                onmouseout="this.style.borderColor=\'var(--card-border)\'">${e}</button>`
-            ).join("")}
-          </div>` : ""}
+          <button onclick="toggleHarvestReactPicker(\'${id}\')"
+            style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
+                   border-radius:20px;padding:4px 10px;font-size:13px;cursor:pointer;
+                   color:var(--text-muted);font-family:var(--font-sans)">😊 React</button>` : ""}
+      </div>
+      <div id="harvest-react-picker-${id}" class="hidden"
+        style="display:flex;flex-wrap:wrap;gap:5px;padding:2px 0 8px">
+        ${userProfile && !userProfile.isGuest ? REACTIONS_LIST.map(e => `
+          <button onclick="addHarvestReaction(\'${id}\',\'${e}\');toggleHarvestReactPicker(\'${id}\')"
+            style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
+                   border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;
+                   font-family:var(--font-sans)">${e}</button>`).join("") : ""}
       </div>
 
       <!-- Comments -->
@@ -3696,6 +3706,324 @@ window.saveTcPhotos = async function () {
 
 
 // ============================================================
+// CABIN CALENDAR
+// ============================================================
+let calCurrentYear  = new Date().getFullYear();
+let calCurrentMonth = new Date().getMonth(); // 0-indexed
+let calVisitDocs    = {};  // { "YYYY-MM-DD": [visits] }
+let calUnsub        = null;
+
+window.renderCalendarScreen = async function () {
+  const el = document.getElementById("calendar-content");
+  if (!el) return;
+
+  el.innerHTML = `<div style="padding:32px;text-align:center">
+    <div class="spinner" style="margin:0 auto"></div>
+  </div>`;
+
+  // Load visits for current month
+  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+  renderCalendarGrid(el);
+};
+
+async function loadCalendarMonth(year, month) {
+  if (calUnsub) { calUnsub(); calUnsub = null; }
+
+  const start = new Date(year, month, 1);
+  const end   = new Date(year, month + 1, 0, 23, 59, 59);
+
+  try {
+    const snap = await getDocs(query(
+      collection(db, "visits"),
+      where("visitDate", ">=", Timestamp.fromDate(start)),
+      where("visitDate", "<=", Timestamp.fromDate(end))
+    ));
+
+    calVisitDocs = {};
+    snap.docs.forEach(d => {
+      const data = d.data();
+      const date = data.visitDate?.toDate ? data.visitDate.toDate() : new Date(data.visitDate);
+      const key  = date.toISOString().split("T")[0];
+      if (!calVisitDocs[key]) calVisitDocs[key] = [];
+      calVisitDocs[key].push({ id: d.id, ...data });
+    });
+  } catch(err) {
+    console.error(err);
+    calVisitDocs = {};
+  }
+}
+
+function renderCalendarGrid(el) {
+  const MONTHS = ["January","February","March","April","May","June",
+                  "July","August","September","October","November","December"];
+  const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+  const year  = calCurrentYear;
+  const month = calCurrentMonth;
+  const today = new Date();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const prevDays = new Date(year, month, 0).getDate();
+
+  // Build grid cells
+  let cells = "";
+
+  // Previous month padding
+  for (let i = firstDay - 1; i >= 0; i--) {
+    cells += `<div style="aspect-ratio:1;padding:4px;opacity:0.25">
+      <div style="font-size:12px;color:var(--text-dim);text-align:right">${prevDays - i}</div>
+    </div>`;
+  }
+
+  // Current month days
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr    = year + "-" + String(month+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
+    const visits     = calVisitDocs[dateStr] || [];
+    const isToday    = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+    const hasVisit   = visits.length > 0;
+
+    // Unique visitor avatars (up to 3)
+    const visitors   = [...new Map(visits.map(v => [v.uid, v])).values()].slice(0, 3);
+
+    cells += `
+      <div onclick="openCalendarDay('${dateStr}')"
+        style="aspect-ratio:1;padding:4px;border-radius:var(--radius-md);cursor:pointer;
+               background:${isToday ? "rgba(196,169,106,0.12)" : hasVisit ? "rgba(212,98,42,0.08)" : "transparent"};
+               border:1px solid ${isToday ? "var(--gold-dim)" : hasVisit ? "rgba(212,98,42,0.25)" : "transparent"};
+               transition:background 0.15s;display:flex;flex-direction:column;
+               align-items:center;justify-content:space-between;min-height:44px"
+        onmouseover="this.style.background='rgba(255,255,255,0.06)'"
+        onmouseout="this.style.background='${isToday ? "rgba(196,169,106,0.12)" : hasVisit ? "rgba(212,98,42,0.08)" : "transparent"}'">
+        <div style="font-size:13px;font-weight:${isToday?"700":"400"};
+                    color:${isToday ? "var(--gold)" : "var(--text-warm)"};
+                    align-self:flex-end">${d}</div>
+        ${hasVisit ? `
+          <div style="display:flex;gap:-4px;margin-top:2px">
+            ${visitors.map(v => `
+              <div style="width:16px;height:16px;border-radius:50%;
+                          background:${v.visitorColor||"#556B2F"};
+                          font-size:8px;display:flex;align-items:center;
+                          justify-content:center;color:#fff;font-weight:700;
+                          margin-right:-4px;border:1px solid rgba(0,0,0,0.3)">
+                ${(v.visitorInitials||"?").slice(0,1)}
+              </div>`).join("")}
+          </div>` : ""}
+      </div>`;
+  }
+
+  // Next month padding
+  const totalCells = firstDay + daysInMonth;
+  const remaining  = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let i = 1; i <= remaining; i++) {
+    cells += `<div style="aspect-ratio:1;padding:4px;opacity:0.25">
+      <div style="font-size:12px;color:var(--text-dim);text-align:right">${i}</div>
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div style="padding:0 0 80px">
+
+      <!-- Month navigation -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  padding:16px 16px 12px;border-bottom:1px solid var(--gold-dim)">
+        <button onclick="calPrevMonth()"
+          style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
+                 border-radius:var(--radius-md);padding:8px 14px;color:var(--text-warm);
+                 font-size:16px;cursor:pointer;font-family:var(--font-sans)">‹</button>
+        <div style="text-align:center">
+          <div style="font-family:var(--font-serif);font-size:18px;color:var(--gold)">
+            ${MONTHS[month]}
+          </div>
+          <div style="font-size:12px;color:var(--text-muted)">${year}</div>
+        </div>
+        <button onclick="calNextMonth()"
+          style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
+                 border-radius:var(--radius-md);padding:8px 14px;color:var(--text-warm);
+                 font-size:16px;cursor:pointer;font-family:var(--font-sans)">›</button>
+      </div>
+
+      <!-- Day headers -->
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);
+                  padding:8px 12px 4px;gap:2px">
+        ${DAYS.map(d => `
+          <div style="text-align:center;font-size:11px;color:var(--text-muted);
+                      font-weight:600;letter-spacing:0.5px;text-transform:uppercase">
+            ${d}
+          </div>`).join("")}
+      </div>
+
+      <!-- Calendar grid -->
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);
+                  padding:4px 12px;gap:4px">
+        ${cells}
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex;gap:16px;padding:12px 16px;
+                  border-top:1px solid rgba(196,169,106,0.08);margin-top:8px">
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <div style="width:12px;height:12px;border-radius:3px;
+                      background:rgba(212,98,42,0.2);border:1px solid rgba(212,98,42,0.4)"></div>
+          Cabin visited
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <div style="width:12px;height:12px;border-radius:3px;
+                      background:rgba(196,169,106,0.15);border:1px solid var(--gold-dim)"></div>
+          Today
+        </div>
+      </div>
+
+      <!-- Upcoming / recent visits -->
+      <div style="padding:0 16px">
+        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;
+                    letter-spacing:0.5px;margin-bottom:10px">
+          This Month's Visits
+        </div>
+        ${Object.keys(calVisitDocs).length === 0
+          ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:8px 0">
+               No visits logged this month yet.
+             </div>`
+          : Object.entries(calVisitDocs)
+              .sort((a,b) => b[0].localeCompare(a[0]))
+              .map(([dateStr, visits]) => {
+                const d = new Date(dateStr + "T12:00:00");
+                const label = d.toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" });
+                return `
+                  <div style="background:var(--forest-card);border:1px solid var(--card-border);
+                              border-radius:var(--radius-md);padding:12px;margin-bottom:8px">
+                    <div style="font-size:13px;font-weight:600;color:var(--gold);margin-bottom:8px">
+                      ${label}
+                    </div>
+                    ${visits.map(v => `
+                      <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+                        <div class="avatar" style="background:${v.visitorColor||"#556B2F"};
+                             width:28px;height:28px;font-size:10px;flex-shrink:0">
+                          ${v.visitorInitials||"?"}
+                        </div>
+                        <div style="flex:1">
+                          <div style="font-size:13px;color:var(--text-warm)">${v.visitorName||"Unknown"}</div>
+                          ${v.notes ? `<div style="font-size:11px;color:var(--text-muted)">${v.notes}</div>` : ""}
+                        </div>
+                        ${(userProfile?.uid === v.uid || userProfile?.role === "admin") ? `
+                          <button onclick="deleteCalendarVisit('${v.id}')"
+                            style="background:none;border:none;color:var(--text-dim);
+                                   font-size:14px;cursor:pointer">🗑</button>` : ""}
+                      </div>`).join("")}
+                  </div>`;
+              }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+window.calPrevMonth = async function () {
+  calCurrentMonth--;
+  if (calCurrentMonth < 0) { calCurrentMonth = 11; calCurrentYear--; }
+  const el = document.getElementById("calendar-content");
+  if (el) { el.innerHTML = '<div style="padding:32px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>'; }
+  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+  if (el) renderCalendarGrid(el);
+};
+
+window.calNextMonth = async function () {
+  calCurrentMonth++;
+  if (calCurrentMonth > 11) { calCurrentMonth = 0; calCurrentYear++; }
+  const el = document.getElementById("calendar-content");
+  if (el) { el.innerHTML = '<div style="padding:32px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>'; }
+  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+  if (el) renderCalendarGrid(el);
+};
+
+window.openCalendarDay = function (dateStr) {
+  const visits = calVisitDocs[dateStr] || [];
+  const d      = new Date(dateStr + "T12:00:00");
+  const label  = d.toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
+
+  const ov = document.createElement("div");
+  ov.className = "modal-overlay"; ov.id = "cal-day-overlay";
+  ov.innerHTML = `
+    <div class="modal-box" style="max-width:360px;max-height:85vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="modal-title" style="margin:0;font-size:16px">${label}</div>
+        <button onclick="document.getElementById('cal-day-overlay').remove()"
+          style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer">✕</button>
+      </div>
+
+      ${visits.length === 0
+        ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;margin-bottom:16px">
+             Nobody logged a visit on this day yet.
+           </div>`
+        : visits.map(v => `
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
+                        border-bottom:1px solid rgba(196,169,106,0.08)">
+              <div class="avatar" style="background:${v.visitorColor||"#556B2F"};
+                   width:32px;height:32px;font-size:11px">
+                ${v.visitorInitials||"?"}
+              </div>
+              <div style="flex:1">
+                <div style="font-size:14px;color:var(--text-warm);font-weight:600">${v.visitorName||"Unknown"}</div>
+                ${v.notes ? `<div style="font-size:12px;color:var(--text-muted)">${v.notes}</div>` : ""}
+              </div>
+            </div>`).join("")}
+
+      ${!userProfile?.isGuest ? `
+        <div style="margin-top:14px">
+          <div class="input-group" style="margin-bottom:10px">
+            <label>Notes (optional)</label>
+            <input type="text" id="cal-visit-notes" placeholder="What are you up to?" maxlength="120" />
+          </div>
+          <button class="btn btn-primary btn-full" onclick="saveCalendarVisit('${dateStr}')">
+            📅 Log My Visit
+          </button>
+        </div>` : ""}
+    </div>`;
+  document.body.appendChild(ov);
+};
+
+window.openAddCalendarVisit = function () {
+  const today = new Date().toISOString().split("T")[0];
+  openCalendarDay(today);
+};
+
+window.saveCalendarVisit = async function (dateStr) {
+  if (!userProfile || userProfile.isGuest) return;
+  const notes = document.getElementById("cal-visit-notes")?.value.trim() || "";
+  try {
+    await addDoc(collection(db, "visits"), {
+      visitDate:        Timestamp.fromDate(new Date(dateStr + "T12:00:00")),
+      uid:              userProfile.uid,
+      visitorName:      userProfile.displayName,
+      visitorInitials:  userProfile.initials,
+      visitorColor:     userProfile.color,
+      notes,
+      createdAt:        serverTimestamp()
+    });
+    document.getElementById("cal-day-overlay")?.remove();
+    showToast("Visit logged! 📅", "success");
+    // Refresh
+    await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+    const el = document.getElementById("calendar-content");
+    if (el) renderCalendarGrid(el);
+  } catch(err) {
+    console.error(err);
+    showToast("Could not save visit.", "error");
+  }
+};
+
+window.deleteCalendarVisit = function (id) {
+  appConfirm("Remove Visit", "Remove this visit from the calendar?", async () => {
+    try {
+      await deleteDoc(doc(db, "visits", id));
+      showToast("Visit removed.", "success");
+      await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+      const el = document.getElementById("calendar-content");
+      if (el) renderCalendarGrid(el);
+    } catch(err) { console.error(err); showToast("Could not remove.", "error"); }
+  });
+};
+
+
+// ============================================================
 // KILL COUNTER & TIER SYSTEM
 // ============================================================
 
@@ -4008,7 +4336,7 @@ window.renderFeedScreen = function () {
   loadFeed();
 };
 
-let feedPageSize = 10;
+let feedPageSize = 20;
 let feedLastDoc  = null;
 let feedAllLoaded = false;
 
@@ -4016,7 +4344,7 @@ function loadFeed() {
   if (feedUnsub) { feedUnsub(); feedUnsub = null; }
   feedLastDoc   = null;
   feedAllLoaded = false;
-  feedPageSize  = 10;
+  feedPageSize  = 20;
   const list = document.getElementById("feed-list");
   if (!list) return;
 
@@ -4624,3 +4952,4 @@ if ("serviceWorker" in navigator) {
       .catch((err) => console.log("SW registration failed:", err));
   });
 }
+

@@ -225,7 +225,7 @@
     <!-- ── HARVEST COMPARISON ─────────────────────────────── -->
     <section class="screen" id="screen-harvest-compare">
       <div class="back-bar">
-        <button class="back-btn" onclick="showScreen('screen-harvest-detail')">← Back</button>
+        <button class="back-btn" onclick="showScreen('screen-harvest')">← Back</button>
         <span class="section-title" style="margin-left:8px">Compare to Trail Cam</span>
       </div>
       <div id="harvest-compare-content"></div>
@@ -392,7 +392,10 @@
       'renderMyKillsScreen','renderAdminScreen','adminPostBulletin','adminCreateGuestKey',
       'doCheckout','confirmCheckout','finishCheckout','goodChoice',
       'forceUpdate','selectCmpUser','selectCmpPhoto','toggleCmpSection',
-      'openHarvestCompare','loadMoreFeed'
+      'openHarvestCompare','loadMoreFeed',
+      'renderCalendarScreen','calPrevMonth','calNextMonth',
+      'openCalendarDay','openAddCalendarVisit','saveCalendarVisit','deleteCalendarVisit',
+      'toggleHarvestReactPicker','switchKillsView','toggleMyKillRow'
     ];
 
     fns.forEach(function(fn) {
