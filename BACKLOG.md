@@ -33,6 +33,31 @@ The next deep pass should be dedicated to these two themes, not features.
   whether any member reused a breached password — Firebase stores only salted
   hashes so the app didn't leak anything, but reuse is the risk. Not a code fix
   per se; note it here so the next sweep double-checks auth config.
+- **Optional biometric app-lock (opt-in toggle in Settings).**
+  User request 2026-08-29. Design: a *local* lock, not a replacement for the
+  Firebase password.
+  - Settings → Account & Security → "Require Face ID / fingerprint to open the
+    app" toggle (yes/no). Feature-detect first:
+    `window.PublicKeyCredential &&
+    await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()`
+    — hide the toggle entirely if the device has no platform authenticator.
+  - On enable: `navigator.credentials.create()` with
+    `authenticatorSelection: { authenticatorAttachment: 'platform',
+    userVerification: 'required' }`, store the returned credential id in
+    `localStorage` (per-device). No server round-trip — this is a local gate.
+  - On app launch (in `onAuthStateChanged`, before `enterApp`): if the toggle
+    is on and a credential id exists, show a lock screen and call
+    `navigator.credentials.get({ publicKey: { userVerification: 'required',
+    allowCredentials: [{ id, type: 'public-key' }] } })`. Only reveal the app
+    on success. Offer a "use password instead" fallback that signs out and
+    returns to the login screen.
+  - Caveats to document in the UI: it's a convenience lock (clearing site data
+    or the Firebase session elsewhere bypasses it); it's per-device; it does
+    NOT protect data at the database layer — that's what the Firestore-rules
+    fix above is for. Works on iOS 16.4+ Safari/PWA, Android Chrome, desktop
+    Windows Hello / Touch ID.
+  - Effort: ~half a day, client-side only. Do it in the same sweep as the rules
+    tightening so "app safety" lands as one coherent release.
 
 ### Consistency (do alongside)
 
