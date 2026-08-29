@@ -3595,13 +3595,19 @@ window.openAddTrailCam = async function () {
 
   let albums = [];
   try {
+    // Filter by owner only, sort newest-first in JS (no composite index needed).
     const snap = await getDocs(query(
       collection(db, "trailcamAlbums"),
-      where("uid", "==", userProfile.uid),
-      orderBy("updatedAt", "desc")
+      where("uid", "==", userProfile.uid)
     ));
-    albums = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch(err) { albums = []; }
+    albums = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : 0;
+        const tb = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : 0;
+        return tb - ta;
+      });
+  } catch(err) { console.error(err); albums = []; }
 
   window._tcSelectedFiles = [];
   window._tcAlbumId       = null;
