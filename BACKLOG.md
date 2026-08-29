@@ -149,77 +149,26 @@ The next deep pass should be dedicated to these two themes, not features.
 
 ## Feature ideas
 
-### "Trophy Room" — a scroll-feed of personal stat cards
+### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 
-Direction (user, 2026-08-29): not a compact charts panel — a **dedicated
-screen you scroll through**, one full-width card per stat, feed-style. "Cool
-stuff really adds up in an era of down-scrolling." Ego candy is the point.
+Built: `renderTrophyRoom` (stat-card feed, camp rankings, by-year bars, award
+badges), `renderMasterTrophyRoom` (champion + runner-up per category + contest
+champions), shared `loadTrophyData` / `computeTrophyStats` layer, harvest-form
+and Harvest Log cross-links, "Trophy added" confirmation. Contest placements
+are derived live from `contestEntries` sorted per closed season — no
+`closeContest` schema change was needed.
 
-Reached from: its own drawer item ("Trophy Room" / "My Stats") and/or a
-"Stats" toggle inside My Kills. The existing Kill Breakdown *list* stays as
-the quick reference; this is the immersive version.
-
-**Card anatomy** (each card = one metric):
-- Rank chip — where you sit at camp for this stat ("#2 at camp"); #1 styled
-  distinctly ("camp record").
-- Headline number + label (e.g. `15` / "bucks, all-time"; `142"` / "your best
-  rack · 2024").
-- Optional mini chart — by-year bars, a rack-size trend line — hand-rolled
-  inline SVG / CSS divs, no chart library (matches calendar/map approach).
-- Context line — "only Tucker is ahead of you (19)", "you hold this record".
-- **Badge list** — the good part. Any awards that stat has earned:
-  - contest wins / placements: "Won the Big Buck contest, 2024",
-    "Runner-up, Bow Buck 2025 (128")"
-  - year leader: "Biggest buck at camp in 2024"
-  - all-time standing: "3rd-biggest at camp since 2019", "camp record"
-  - personal: "Your 2024 season best"
-
-**Cards to build** (start ~6, grow the list):
-bucks harvested · total harvests / kill points · best rack · heaviest animal ·
-does harvested · longest beard · longest spurs · bear stats · most active
-season · most consecutive years with a filled tag · first tag filled this
-year · trail-cam photos contributed · summary card ("You hold 3 camp records").
-
-**Data** — all in Firestore already, just needs camp-wide crunching instead of
-per-person. For ~12 members over a few seasons it's a few hundred docs — load
-once, compute the whole feed client-side.
-| Card content | Source |
-|---|---|
-| your counts / sizes / weights | your `harvests` docs |
-| camp rank, who's ahead | ALL `harvests`, group by `uid`, sort |
-| "biggest buck of 20XX" | all harvests → max `rackScore` per year → is it yours |
-| "camp record since 20XX" | all-time max across all harvests |
-| contest wins / placements | `contestEntries` + `contestMeta` (closed seasons store `winnerUid`/`winnerMeasure`) |
-
-Harvest fields available: `species`, `harvestDate`, `weight`, `rackScore`,
-`antlerPoints`, `insideSpread`, `deerType`, `turkeySex`, `beardLength`,
-`spurLeft/Right`, `bearColor`, `quantity`.
-
-**Implementation notes:**
-- Feature UI can be as flashy as it wants; the **"App Updates" changelog entry
-  stays plain and factual** — no hype vocabulary in version notes (standing
-  rule for every line in `renderUpdatesScreen`; history cleaned 2026-08-29).
-- Keep distinct from Contests: contests are seasonal + opt-in + manual entry;
-  Trophy Room is all-time + automatic from logged harvests.
-- Guard tiny sample sizes — hide trend charts / "you rank #X" lines under ~3
-  data points; show "log a few more to unlock this".
-- Responsive SVG (`viewBox` + `width:100%`), `<title>` tooltips on bars/points.
-- Reuse `speciesInfo()` for icons/labels, `KILL_POINTS` for any points math,
-  `CONTESTS` labels for badge text — keep it all in sync.
-- Ordering: put the cards where the member ranks highest first (lead with wins),
-  or let them pin favorites. Cards where they have no data or rank last can be
-  dimmed / collapsed rather than hidden, so there's always somewhere to climb.
-- Camp-wide aggregate could get heavy over many years — cache it (compute once
-  per session, or a lightweight `campStats` summary doc an admin/Cloud Function
-  refreshes) before it matters.
-
-### Contest badges → feed the Trophy Room
-
-Once the Trophy Room exists, contest results should surface as badges on the
-relevant stat cards (best rack ← Big Buck / Bow Buck wins; heaviest ← if a
-weight contest is ever added). Needs `contestMeta` to keep the winner snapshot
-(it already does) and ideally to also record 2nd/3rd place so "runner-up"
-badges are possible — small addition to `closeContest`.
+Follow-up polish (do later):
+- More cards: bear stats, trail-cam photos contributed, "first tag filled this
+  year" race, biggest-doe-by-weight.
+- Real charts beyond the by-year bars — a rack-size trend line, seasonality by
+  month. Still hand-rolled SVG.
+- Let members pin favourite cards to the top.
+- Camp-wide aggregate is loaded fresh each session (`getDocs` on all harvests).
+  Fine now; if it ever gets heavy, add a `campStats` summary doc refreshed by a
+  Cloud Function.
+- `trophyStatCard` bars/points have `title` tooltips but no `<title>` SVG — add
+  when the SVG charts land.
 
 ## Also noted (minor, no rush)
 
