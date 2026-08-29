@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.8.0";
+const APP_VERSION = "lite-2.8.1";
 
 
 
@@ -632,7 +632,7 @@ function renderHomeScreen() {
     <div class="feature-grid">
       ${featureGridBtn("🦌", "Harvest Log",    "goHarvest()")}
       ${featureGridBtn("📷", "Trail Cam",      "goTrailCam()")}
-      ${featureGridBtn("📅", "Cabin Calendar", "goCalendar()")}
+      ${featureGridBtn(miniCalIcon(), "Cabin Calendar", "goCalendar()")}
       ${featureGridBtn("💬", "Feed",            "goFeed()")}
     </div>
   `;
@@ -659,6 +659,23 @@ function featureGridBtn(icon, label, action) {
     <span class="feat-icon">${icon}</span>
     <span class="feat-label">${label}</span>
   </button>`;
+}
+
+// A little calendar tile that actually shows today's date, instead of the
+// 📅 emoji (which is frozen on July 17 on most phones).
+function miniCalIcon() {
+  const now = new Date();
+  const mon = now.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+  const day = now.getDate();
+  return `<span style="display:inline-flex;flex-direction:column;width:34px;height:34px;
+    border-radius:7px;overflow:hidden;border:1px solid rgba(0,0,0,0.4);
+    box-shadow:0 2px 5px rgba(0,0,0,0.5)">
+    <span style="background:linear-gradient(135deg,var(--orange),var(--orange-bright));
+      color:#fff;font-size:8px;font-weight:800;letter-spacing:0.5px;text-align:center;
+      padding:2px 0 1px;line-height:1">${mon}</span>
+    <span style="flex:1;display:flex;align-items:center;justify-content:center;
+      background:#f1e8d5;color:#2a2318;font-size:16px;font-weight:800;line-height:1">${day}</span>
+  </span>`;
 }
 
 
@@ -754,15 +771,54 @@ function windDir(deg) {
 }
 
 // ============================================================
-// MAP SCREEN — Placeholder
+// MAP SCREEN — Camp map image
 // ============================================================
 function renderMapScreen() {
-  document.getElementById("map-content").innerHTML = `
-    <div style="padding:16px;color:var(--text-muted);font-size:13px">
-      Map coming soon.
+  const el = document.getElementById("map-content");
+  if (!el) return;
+  el.innerHTML = `
+    <div style="padding:16px">
+      <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;
+                  letter-spacing:0.5px;margin-bottom:10px">Camp Map</div>
+      <button onclick="openMapFull()"
+        style="display:block;width:100%;padding:0;border:1px solid var(--card-border);
+               border-radius:var(--radius-lg);overflow:hidden;background:var(--forest-card);
+               cursor:pointer">
+        <img src="Images/cabinmap.jpg" alt="Tucker's Camp map"
+          style="width:100%;display:block" />
+      </button>
+      <div style="font-size:12px;color:var(--text-dim);text-align:center;margin-top:8px">
+        Tap the map to open it full screen
+      </div>
     </div>
   `;
 }
+
+window.openMapFull = function () {
+  if (document.getElementById("map-lightbox")) return;
+  const lb = document.createElement("div");
+  lb.id = "map-lightbox";
+  lb.style.cssText = "position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.97);" +
+                     "display:flex;flex-direction:column";
+  lb.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:12px 16px;flex-shrink:0">
+      <div style="font-family:var(--font-serif);font-size:16px;color:var(--gold)">Camp Map</div>
+      <button onclick="document.getElementById('map-lightbox').remove()"
+        style="background:rgba(255,255,255,0.1);border:1px solid var(--card-border);
+               color:var(--text-warm);width:36px;height:36px;border-radius:50%;
+               font-size:18px;cursor:pointer;font-family:var(--font-sans)">✕</button>
+    </div>
+    <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;
+                display:flex;align-items:flex-start;justify-content:center">
+      <img src="Images/cabinmap.jpg" alt="Tucker's Camp map"
+        style="width:180%;max-width:none;height:auto;display:block" />
+    </div>
+    <div style="flex-shrink:0;text-align:center;padding:8px;font-size:11px;color:var(--text-dim)">
+      Pinch to zoom · drag to pan
+    </div>`;
+  document.body.appendChild(lb);
+};
 
 // ============================================================
 // SETTINGS SCREEN — Basic (full build Step 10)
@@ -1097,6 +1153,14 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.8.1", date: "Aug 2026", notes: [
+      "Camp map added to the Map tab — tap to open full screen",
+      "Calendar days now have a subtle fill; removed the color legend",
+      "Cabin Calendar tile shows today's date instead of a fixed calendar icon",
+      "My Kills now loads reliably and has friendlier empty / offline messages",
+      "All member-entered text is now safely displayed (names, notes, comments)",
+      "Reacting or commenting no longer makes the feed jump or collapse"
+    ]},
     { version: "lite-2.8.0", date: "May 2026", notes: [
       "Cabin Calendar — full month grid view with visit logging",
       "Tap any day to see who visited and log your own visit with notes",
@@ -3924,12 +3988,16 @@ function renderCalendarGrid(el) {
     </div>`;
   }
 
+  // Off-cream fill for ordinary days; today and visited days keep their accents.
+  const DAY_BG = "rgba(237,226,200,0.06)";
+
   // Current month days
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr    = year + "-" + String(month+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
     const visits     = calVisitDocs[dateStr] || [];
     const isToday    = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
     const hasVisit   = visits.length > 0;
+    const dayBg      = isToday ? "rgba(196,169,106,0.12)" : hasVisit ? "rgba(212,98,42,0.08)" : DAY_BG;
 
     // Unique visitor avatars (up to 3)
     const visitors   = [...new Map(visits.map(v => [v.uid, v])).values()].slice(0, 3);
@@ -3937,12 +4005,12 @@ function renderCalendarGrid(el) {
     cells += `
       <div onclick="openCalendarDay('${dateStr}')"
         style="aspect-ratio:1;padding:4px;border-radius:var(--radius-md);cursor:pointer;
-               background:${isToday ? "rgba(196,169,106,0.12)" : hasVisit ? "rgba(212,98,42,0.08)" : "transparent"};
-               border:1px solid ${isToday ? "var(--gold-dim)" : hasVisit ? "rgba(212,98,42,0.25)" : "transparent"};
+               background:${dayBg};
+               border:1px solid ${isToday ? "var(--gold-dim)" : hasVisit ? "rgba(212,98,42,0.25)" : "rgba(237,226,200,0.10)"};
                transition:background 0.15s;display:flex;flex-direction:column;
                align-items:center;justify-content:space-between;min-height:44px"
         onmouseover="this.style.background='rgba(255,255,255,0.06)'"
-        onmouseout="this.style.background='${isToday ? "rgba(196,169,106,0.12)" : hasVisit ? "rgba(212,98,42,0.08)" : "transparent"}'">
+        onmouseout="this.style.background='${dayBg}'">
         <div style="font-size:13px;font-weight:${isToday?"700":"400"};
                     color:${isToday ? "var(--gold)" : "var(--text-warm)"};
                     align-self:flex-end">${d}</div>
@@ -4007,20 +4075,7 @@ function renderCalendarGrid(el) {
         ${cells}
       </div>
 
-      <!-- Legend -->
-      <div style="display:flex;gap:16px;padding:12px 16px;
-                  border-top:1px solid rgba(196,169,106,0.08);margin-top:8px">
-        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
-          <div style="width:12px;height:12px;border-radius:3px;
-                      background:rgba(212,98,42,0.2);border:1px solid rgba(212,98,42,0.4)"></div>
-          Cabin visited
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
-          <div style="width:12px;height:12px;border-radius:3px;
-                      background:rgba(196,169,106,0.15);border:1px solid var(--gold-dim)"></div>
-          Today
-        </div>
-      </div>
+      <div style="height:16px"></div>
 
       <!-- Upcoming / recent visits -->
       <div style="padding:0 16px">
@@ -4867,10 +4922,17 @@ window.renderMyKillsScreen = async function () {
     const progress = nextTier ? Math.min(100, Math.round((pts / nextTier.pts) * 100)) : 100;
     const viewName = viewData.displayName || "Member";
 
-    // Load harvests
-    const q    = query(collection(db, "harvests"), where("uid","==",viewUid), orderBy("harvestDate","desc"));
+    // Load harvests. Filter by member only, then sort newest-first in JS —
+    // that avoids needing a composite Firestore index for where + orderBy.
+    const q    = query(collection(db, "harvests"), where("uid","==",viewUid));
     const snap = await getDocs(q);
-    myKillsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    myKillsData = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.harvestDate?.toMillis ? a.harvestDate.toMillis() : new Date(a.harvestDate || 0).getTime();
+        const tb = b.harvestDate?.toMillis ? b.harvestDate.toMillis() : new Date(b.harvestDate || 0).getTime();
+        return tb - ta;
+      });
 
     // Species breakdown
     const breakdown = {};
@@ -5001,7 +5063,7 @@ window.renderMyKillsScreen = async function () {
             ${isOwn ? "Your Harvest History" : esc(viewName) + "'s Harvests"}
           </div>
           ${myKillsData.length === 0
-            ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:8px 0">No harvests logged yet.</div>`
+            ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:8px 0">${isOwn ? "No harvests logged yet — tag your first one from the Harvest Log." : "No harvests logged yet."}</div>`
             : myKillsData.map(h => renderMyKillRow(h, isOwn)).join("")}
         </div>
 
@@ -5009,7 +5071,13 @@ window.renderMyKillsScreen = async function () {
     `;
   } catch(err) {
     console.error(err);
-    content.innerHTML = `<div style="padding:16px;color:var(--danger)">Could not load kills.</div>`;
+    content.innerHTML = `
+      <div style="padding:40px 24px;text-align:center;color:var(--text-muted)">
+        <div style="font-size:36px;margin-bottom:10px">📡</div>
+        <div style="font-size:14px;margin-bottom:4px">Couldn't reach the kill log right now.</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">Check your connection and try again.</div>
+        <button class="btn btn-secondary btn-sm" onclick="renderMyKillsScreen()">Retry</button>
+      </div>`;
   }
 };
 
