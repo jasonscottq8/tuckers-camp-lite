@@ -178,6 +178,11 @@ loads, plus maybe a camp-wide aggregate):
   seasonal + opt-in, this is all-time + automatic).
 
 Implementation notes:
+- The feature can be as flashy as it wants IN the UI, but the **"App Updates"
+  changelog entry for it stays plain and factual** — no ego-massaging /
+  hype vocabulary in the version notes. (Standing rule: every changelog line
+  in `renderUpdatesScreen` describes what changed, neutrally. Existing history
+  was cleaned to match on 2026-08-29.)
 - New collapsible sub-sections under Kill Breakdown, or a toggle between
   "List" and "Charts" view.
 - Guard for tiny sample sizes — a "trend" with 1 harvest looks silly; show

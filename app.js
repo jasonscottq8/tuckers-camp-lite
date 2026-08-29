@@ -1280,7 +1280,7 @@ function renderUpdatesScreen() {
     { version: "lite-2.9.2", date: "Aug 2026", notes: [
       "Fixed broken photos everywhere — harvest, trail cam, feed and contest pictures now display",
       "Added a Bow Buck contest alongside Big Buck and Big Doe",
-      "Admins can end a contest season and crown the winner (and reopen it)",
+      "Admins can close a contest season and mark the winner (and reopen it)",
       "App version now shown next to the title in the header"
     ]},
     { version: "lite-2.9.1", date: "Aug 2026", notes: [
