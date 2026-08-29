@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.8.1";
+const APP_VERSION = "lite-2.9.0";
 
 
 
@@ -508,6 +508,7 @@ window.showScreen = function (screenId) {
     if (currentScreen === "screen-harvest"  && harvestListUnsub) { harvestListUnsub(); harvestListUnsub = null; }
     if (currentScreen === "screen-trailcam" && trailCamUnsub)    { trailCamUnsub();   trailCamUnsub   = null; }
     if (currentScreen === "screen-feed"     && feedUnsub)        { feedUnsub();       feedUnsub       = null; }
+    if (currentScreen === "screen-contests" && contestUnsub)     { contestUnsub();    contestUnsub    = null; }
   }
 
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -661,20 +662,23 @@ function featureGridBtn(icon, label, action) {
   </button>`;
 }
 
-// A little calendar tile that actually shows today's date, instead of the
-// 📅 emoji (which is frozen on July 17 on most phones).
-function miniCalIcon() {
-  const now = new Date();
-  const mon = now.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
-  const day = now.getDate();
-  return `<span style="display:inline-flex;flex-direction:column;width:34px;height:34px;
-    border-radius:7px;overflow:hidden;border:1px solid rgba(0,0,0,0.4);
-    box-shadow:0 2px 5px rgba(0,0,0,0.5)">
+// A little calendar tile that actually shows a real date, instead of the
+// 📅 emoji (which is frozen on July 17 on most phones). Pass a Date to show
+// that day; defaults to today. `size` is the tile edge in px.
+function miniCalIcon(date, size = 34) {
+  const dt  = date instanceof Date ? date : new Date();
+  const mon = dt.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+  const day = dt.getDate();
+  const numSize = Math.round(size * 0.47);
+  const monSize = Math.max(6, Math.round(size * 0.235));
+  return `<span style="display:inline-flex;flex-direction:column;width:${size}px;height:${size}px;
+    border-radius:${Math.round(size*0.2)}px;overflow:hidden;border:1px solid rgba(0,0,0,0.4);
+    box-shadow:0 2px 5px rgba(0,0,0,0.5);flex-shrink:0">
     <span style="background:linear-gradient(135deg,var(--orange),var(--orange-bright));
-      color:#fff;font-size:8px;font-weight:800;letter-spacing:0.5px;text-align:center;
+      color:#fff;font-size:${monSize}px;font-weight:800;letter-spacing:0.5px;text-align:center;
       padding:2px 0 1px;line-height:1">${mon}</span>
     <span style="flex:1;display:flex;align-items:center;justify-content:center;
-      background:#f1e8d5;color:#2a2318;font-size:16px;font-weight:800;line-height:1">${day}</span>
+      background:#f1e8d5;color:#2a2318;font-size:${numSize}px;font-weight:800;line-height:1">${day}</span>
   </span>`;
 }
 
@@ -1153,6 +1157,11 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.9.0", date: "Aug 2026", notes: [
+      "Big Buck & Big Doe contests — enter a photo and a measurement, board auto-ranks",
+      "Contest leader gets the 🏆; edit or remove your own entry any time",
+      "Calendar day pop-up shows the date you tapped and its button just says Log"
+    ]},
     { version: "lite-2.8.1", date: "Aug 2026", notes: [
       "Camp map added to the Map tab — tap to open full screen",
       "Calendar days now have a subtle fill; removed the color legend",
@@ -1306,13 +1315,237 @@ function renderBylawsScreen() {
     </div>`;
 }
 
+// ============================================================
+// CONTESTS — Big Buck & Big Doe
+// Each entry: a photo, a measurement, and an optional note. The leaderboard
+// auto-ranks by measurement; whoever is on top is the current leader.
+// ============================================================
+const CONTESTS = {
+  buck: { label: "Big Buck", icon: "🦌", unit: '"',   measureLabel: "Gross antler score (inches)",   ph: "e.g. 142.5" },
+  doe:  { label: "Big Doe",  icon: "🦌", unit: " lbs", measureLabel: "Field-dressed weight (lbs)",     ph: "e.g. 135" }
+};
+let contestTab       = "buck";
+let contestUnsub     = null;
+let contestEntries   = [];
+let contestExpanded  = new Set();
+let editingContestId = null;
+
+function contestYear() { return new Date().getFullYear(); }
+
 function renderContestsScreen() {
   const el = document.getElementById("contests-content");
   if (!el) return;
   el.innerHTML = `
-    <div style="padding:16px;color:var(--text-muted);font-size:13px">
-      Contests — Big Buck & Big Doe — coming soon.
+    <div style="padding:12px 16px 6px;display:flex;gap:8px">
+      ${Object.entries(CONTESTS).map(([id, c]) => `
+        <button class="harvest-filter-btn ${contestTab === id ? "active" : ""}"
+          onclick="switchContestTab('${id}')" style="flex:1">${c.icon} ${c.label}</button>`).join("")}
+    </div>
+    <div style="padding:2px 16px 0;font-size:12px;color:var(--text-muted)">${contestYear()} Season</div>
+    <div class="fade-divider-plain"></div>
+    <div id="contest-board" style="padding:8px 16px 90px">
+      <div style="text-align:center;padding:32px 0;color:var(--text-muted)">
+        <div class="spinner" style="margin:0 auto 12px"></div>Loading…
+      </div>
     </div>`;
+  loadContestEntries();
+}
+
+window.switchContestTab = function (id) {
+  if (!CONTESTS[id]) return;
+  contestTab = id;
+  contestExpanded.clear();
+  renderContestsScreen();
+};
+
+function loadContestEntries() {
+  if (contestUnsub) { contestUnsub(); contestUnsub = null; }
+  const board = document.getElementById("contest-board");
+  if (!board) return;
+  const qy = query(collection(db, "contestEntries"), where("contest", "==", contestTab));
+  contestUnsub = onSnapshot(qy, (snap) => {
+    const yr = contestYear();
+    contestEntries = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(e => (e.year || yr) === yr)
+      .sort((a, b) => (Number(b.measure) || 0) - (Number(a.measure) || 0));
+    renderContestBoard();
+  }, err => {
+    console.error(err);
+    if (board) board.innerHTML = `<div style="color:var(--danger);padding:16px;font-size:13px">Couldn't load the contest right now.</div>`;
+  });
+}
+
+function renderContestBoard() {
+  const board = document.getElementById("contest-board");
+  if (!board) return;
+  const c = CONTESTS[contestTab];
+  const canEnter = userProfile && !userProfile.isGuest;
+
+  const enterBtn = canEnter
+    ? `<button class="btn btn-primary btn-full" onclick="openContestEntry()" style="margin-top:14px">
+         ${c.icon} Enter ${esc(c.label)}
+       </button>`
+    : "";
+
+  if (contestEntries.length === 0) {
+    board.innerHTML = `
+      <div style="text-align:center;padding:40px 0 8px;color:var(--text-muted)">
+        <div style="font-size:44px;margin-bottom:10px">🏆</div>
+        <div style="font-size:14px">No entries yet for ${contestYear()}.</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:4px">Be the first on the board.</div>
+      </div>
+      ${enterBtn}`;
+    return;
+  }
+
+  board.innerHTML = contestEntries.map((e, i) => {
+    const isExp   = contestExpanded.has(e.id);
+    const isOwner = userProfile && (userProfile.uid === e.uid || userProfile.role === "admin");
+    const rank    = i + 1;
+    const medal   = rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
+    const measure = (Number(e.measure) || 0) + c.unit;
+    return `
+      <div style="margin-bottom:${isExp ? "0" : "10px"}">
+        <button class="harvest-row-header ${isExp ? "expanded" : ""}" onclick="toggleContestEntry('${e.id}')">
+          <div style="width:34px;text-align:center;font-size:${rank <= 3 ? "18px" : "13px"};
+                      font-weight:700;color:var(--gold);flex-shrink:0">${medal}</div>
+          <div class="avatar" style="background:${safeColor(e.color)};width:32px;height:32px;font-size:11px;flex-shrink:0">
+            ${esc(e.initials || "?")}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;color:var(--text-warm);overflow:hidden;
+                        white-space:nowrap;text-overflow:ellipsis">${esc(e.memberName || "Member")}</div>
+            <div style="font-size:12px;color:var(--gold)">${esc(measure)}</div>
+          </div>
+          <span style="color:var(--gold);font-size:18px;flex-shrink:0;transition:transform 0.2s;
+                       ${isExp ? "transform:rotate(90deg)" : ""}">›</span>
+        </button>
+        ${isExp ? `
+          <div class="harvest-detail-panel">
+            ${e.photoURL ? `<img src="${encodeURI(e.photoURL)}"
+              style="width:100%;border-radius:var(--radius-md);border:1px solid var(--card-border);
+                     margin-bottom:10px;display:block" />` : ""}
+            ${e.caption ? `<div style="font-size:13px;color:var(--text-muted);line-height:1.5;
+                                       white-space:pre-wrap;word-break:break-word;margin-bottom:${isOwner ? "10px" : "0"}">${esc(e.caption)}</div>` : ""}
+            ${isOwner ? `
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-secondary btn-sm" onclick="openContestEntry('${e.id}')">✏️ Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteContestEntry('${e.id}')">🗑 Delete</button>
+              </div>` : ""}
+          </div>` : ""}
+      </div>`;
+  }).join("") + enterBtn;
+}
+
+window.toggleContestEntry = function (id) {
+  if (contestExpanded.has(id)) contestExpanded.delete(id);
+  else contestExpanded.add(id);
+  renderContestBoard();
+};
+
+window.openContestEntry = function (id) {
+  if (!userProfile || userProfile.isGuest) { showToast("Sign in to enter.", "error"); return; }
+  editingContestId = id || null;
+  const c    = CONTESTS[contestTab];
+  const e    = id ? contestEntries.find(x => x.id === id) || {} : {};
+  const ov = document.createElement("div");
+  ov.className = "modal-overlay"; ov.id = "contest-entry-overlay";
+  ov.innerHTML = `
+    <div class="modal-box" style="max-width:360px;max-height:90vh;overflow-y:auto">
+      <div class="modal-title">${c.icon} ${editingContestId ? "Edit Entry" : "Enter " + esc(c.label)}</div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>${esc(c.measureLabel)}</label>
+        <input type="number" id="contest-measure" inputmode="decimal" step="0.1" min="0"
+          placeholder="${esc(c.ph)}" value="${e.measure != null ? esc(e.measure) : ""}" />
+      </div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>Notes (optional)</label>
+        <textarea id="contest-caption" maxlength="240"
+          placeholder="Where, when, points, story…">${esc(e.caption || "")}</textarea>
+      </div>
+      <div class="input-group" style="margin-bottom:16px">
+        <label>Photo${editingContestId && e.photoURL ? " (leave blank to keep current)" : ""}</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-primary btn-sm" type="button"
+            onclick="document.getElementById('contest-photo').click()">📷 Choose Photo</button>
+          <span id="contest-photo-name" style="font-size:12px;color:var(--text-muted)">
+            ${editingContestId && e.photoURL ? "Current photo kept" : "No file chosen"}
+          </span>
+        </div>
+        <input type="file" id="contest-photo" accept="image/*" style="display:none"
+          onchange="document.getElementById('contest-photo-name').textContent=this.files[0]?.name||'No file chosen'" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('contest-entry-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="contest-submit-btn" onclick="submitContestEntry()">
+          ${editingContestId ? "Save" : "Submit Entry"}
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+};
+
+window.submitContestEntry = async function () {
+  if (!userProfile || userProfile.isGuest) return;
+  const measure = parseFloat(document.getElementById("contest-measure")?.value);
+  const caption = document.getElementById("contest-caption")?.value.trim() || "";
+  const file    = document.getElementById("contest-photo")?.files?.[0] || null;
+  const btn     = document.getElementById("contest-submit-btn");
+  const existing = editingContestId ? contestEntries.find(x => x.id === editingContestId) : null;
+
+  if (!(measure > 0)) { showToast("Enter a measurement.", "error"); return; }
+  if (!file && !existing?.photoURL) { showToast("Add a photo of your deer.", "error"); return; }
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+
+  try {
+    let photoURL = existing?.photoURL || null;
+    if (file) {
+      if (btn) btn.textContent = "Uploading photo…";
+      const compressed = await compressImage(file);
+      const path = `contests/${contestYear()}/${contestTab}/${userProfile.uid}_${Date.now()}.jpg`;
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, compressed, { contentType: "image/jpeg" });
+      photoURL = await getDownloadURL(storageRef);
+    }
+    if (btn) btn.textContent = "Saving…";
+
+    const payload = {
+      contest:    contestTab,
+      year:       contestYear(),
+      measure,
+      caption,
+      photoURL,
+      uid:        userProfile.uid,
+      memberName: userProfile.displayName,
+      initials:   userProfile.initials,
+      color:      userProfile.color,
+      updatedAt:  serverTimestamp()
+    };
+
+    if (editingContestId) {
+      await updateDoc(doc(db, "contestEntries", editingContestId), payload);
+    } else {
+      payload.createdAt = serverTimestamp();
+      await addDoc(collection(db, "contestEntries"), payload);
+    }
+    document.getElementById("contest-entry-overlay")?.remove();
+    showToast(editingContestId ? "Entry updated!" : "You're on the board! 🏆", "success");
+  } catch (err) {
+    console.error(err);
+    showToast("Could not save entry: " + err.message, "error");
+    if (btn) { btn.disabled = false; btn.textContent = editingContestId ? "Save" : "Submit Entry"; }
+  }
+};
+
+window.deleteContestEntry = function (id) {
+  appConfirm("Delete Entry", "Remove this contest entry?", async () => {
+    try {
+      await deleteDoc(doc(db, "contestEntries", id));
+      contestExpanded.delete(id);
+      showToast("Entry removed.", "success");
+    } catch (err) { console.error(err); showToast("Could not delete.", "error"); }
+  });
 }
 
 // ============================================================
@@ -4153,8 +4386,9 @@ window.openCalendarDay = function (dateStr) {
   ov.className = "modal-overlay"; ov.id = "cal-day-overlay";
   ov.innerHTML = `
     <div class="modal-box" style="max-width:360px;max-height:85vh;overflow-y:auto">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-        <div class="modal-title" style="margin:0;font-size:16px">${label}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        ${miniCalIcon(d, 30)}
+        <div class="modal-title" style="margin:0;font-size:16px;flex:1">${label}</div>
         <button onclick="document.getElementById('cal-day-overlay').remove()"
           style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer">✕</button>
       </div>
@@ -4183,7 +4417,7 @@ window.openCalendarDay = function (dateStr) {
             <input type="text" id="cal-visit-notes" placeholder="What are you up to?" maxlength="120" />
           </div>
           <button class="btn btn-primary btn-full" onclick="saveCalendarVisit('${dateStr}')">
-            📅 Log My Visit
+            Log
           </button>
         </div>` : ""}
     </div>`;
@@ -4209,7 +4443,7 @@ window.saveCalendarVisit = async function (dateStr) {
       createdAt:        serverTimestamp()
     });
     document.getElementById("cal-day-overlay")?.remove();
-    showToast("Visit logged! 📅", "success");
+    showToast("Visit logged!", "success");
     // Refresh
     await loadCalendarMonth(calCurrentYear, calCurrentMonth);
     const el = document.getElementById("calendar-content");
