@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.9.2";
+const APP_VERSION = "lite-2.9.3";
 
 
 
@@ -1271,6 +1271,12 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.9.3", date: "Aug 2026", notes: [
+      "Fixed the 😊 React button on harvests — it wasn't opening the emoji picker",
+      "Photo uploads can no longer hang if an image fails to read",
+      "Failed admin actions now say so instead of quietly doing nothing",
+      "Deleting a harvest only removes its own feed post, not all of them"
+    ]},
     { version: "lite-2.9.2", date: "Aug 2026", notes: [
       "Fixed broken photos everywhere — harvest, trail cam, feed and contest pictures now display",
       "Added a Bow Buck contest alongside Big Buck and Big Doe",
@@ -1484,6 +1490,7 @@ window.switchContestTab = function (id) {
   contestTab = id;
   contestExpanded.clear();
   contestMeta = null;
+  contestEntries = [];
   renderContestsScreen();
 };
 
@@ -1831,9 +1838,16 @@ window.submitAdminAction = async function () {
   const reason = document.getElementById("admin-reason-input")?.value.trim();
   if (!reason) { showToast("A reason is required.", "error"); return; }
   const photoAction = document.querySelector('input[name="photo-action"]:checked')?.value || "keep";
-  const { onConfirm, hasPhoto, contentSnapshot, target } = window._pendingAdminAction || {};
+  const { onConfirm, hasPhoto } = window._pendingAdminAction || {};
   document.getElementById("admin-reason-overlay")?.remove();
-  if (onConfirm) await onConfirm(reason, hasPhoto && photoAction === "keep");
+  window._pendingAdminAction = null;
+  if (!onConfirm) return;
+  try {
+    await onConfirm(reason, hasPhoto && photoAction === "keep");
+  } catch (err) {
+    console.error("Admin action failed:", err);
+    showToast("That action didn't go through. Try again.", "error");
+  }
 };
 
 // ============================================================
@@ -2174,9 +2188,12 @@ window.submitBulletin = async function () {
 };
 
 window.adminTogglePin = async function (id, isPinned) {
-  await updateDoc(doc(db, "bulletins", id), { pinned: !isPinned });
-  showToast(isPinned ? "Bulletin unpinned." : "Bulletin pinned!", "success");
-  loadAdminSection("bulletins");
+  try {
+    await updateDoc(doc(db, "bulletins", id), { pinned: !isPinned });
+    showToast(isPinned ? "Bulletin unpinned." : "Bulletin pinned!", "success");
+    loadAdminSection("bulletins");
+    renderHomeScreen();
+  } catch (err) { console.error(err); showToast("Could not update the bulletin.", "error"); }
 };
 
 window.adminDeleteBulletin = function (id, text) {
@@ -2275,7 +2292,7 @@ window.adminToggleGuestKey = function (id, key, isActive) {
     updateDoc(doc(db, "guestKeys", id), { active: true }).then(() => {
       showToast(`Key "${key}" activated.`, "success");
       loadAdminSection("guestkeys");
-    });
+    }).catch(err => { console.error(err); showToast("Could not activate the key.", "error"); });
   }
 };
 
@@ -2460,7 +2477,7 @@ let harvestPhotosShown = new Set();  // harvest ids whose photo is toggled open
 let lastHarvestSnap   = null;
 
 function speciesInfo(id) {
-  return SPECIES.find(s => s.id === id) || { label: id, icon: "🎯" };
+  return SPECIES.find(s => s.id === id) || { label: "Other", icon: "🎯" };
 }
 
 function formatDate(ts) {
@@ -2729,6 +2746,11 @@ function detailStat(label, value) {
     <div style="font-size:14px;font-weight:600;color:var(--text-warm)">${value}</div>
   </div>`;
 }
+
+// ── Reaction picker toggle ───────────────────────────────────
+window.toggleHarvestReactPicker = function (id) {
+  document.getElementById("harvest-react-picker-" + id)?.classList.toggle("hidden");
+};
 
 // ── Photo toggle ─────────────────────────────────────────────
 window.toggleHarvestPhoto = function (id) {
@@ -3227,7 +3249,8 @@ window.saveHarvest = async function () {
         memberName:   userProfile.displayName,
         speciesIcon:  speciesInfo(payload.species).icon,
         speciesLabel: speciesInfo(payload.species).label,
-        uid:          userProfile.uid
+        uid:          userProfile.uid,
+        harvestId:    newDoc.id
       });
     }
   } catch(err) {
@@ -3260,16 +3283,15 @@ window.deleteHarvest = function (id) {
         updateKillCounter();
       }
 
-      // Delete associated auto feed post
-      const feedQ = query(collection(db, "feed"),
-        where("type", "==", "harvest"),
-        where("data.uid", "==", userProfile?.uid || ""),
-        limit(10));
-      const feedSnap = await getDocs(feedQ);
-      feedSnap.docs.forEach(async (d) => {
-        // Delete the most recent harvest feed post
-        await deleteDoc(doc(db, "feed", d.id));
-      });
+      // Delete the ONE auto feed post tied to this harvest (older posts written
+      // before harvestId existed simply stay — better than nuking them all).
+      try {
+        const feedSnap = await getDocs(query(collection(db, "feed"),
+          where("type", "==", "harvest"),
+          where("data.harvestId", "==", id),
+          limit(5)));
+        await Promise.all(feedSnap.docs.map(d => deleteDoc(doc(db, "feed", d.id))));
+      } catch (e) { console.error("Feed cleanup:", e); }
 
       showToast("Harvest deleted.", "success");
     } catch(err) { console.error(err); showToast("Could not delete.", "error"); }
@@ -3295,8 +3317,12 @@ function computeKillPoints(hData) {
 function compressImage(file, maxWidth = 1600, maxHeight = 1600, quality = 0.82) {
   return new Promise((resolve) => {
     const reader = new FileReader();
+    // If anything goes wrong reading/decoding, fall back to the original file
+    // so an upload can never hang forever on a stuck promise.
+    reader.onerror = () => resolve(file);
     reader.onload = (e) => {
       const img = new Image();
+      img.onerror = () => resolve(file);
       img.onload = () => {
         const canvas = document.createElement("canvas");
         let { width, height } = img;
@@ -3468,7 +3494,11 @@ function loadTrailCamFeed() {
   trailCamUnsub = onSnapshot(q, (snap) => {
     window._tcLastSnap = snap;
     renderTcFeed(snap);
-  }, err => { console.error(err); });
+  }, err => {
+    console.error(err);
+    const f = document.getElementById("trailcam-feed");
+    if (f) f.innerHTML = `<div style="color:var(--danger);padding:16px;font-size:13px">Could not load trail cam photos.</div>`;
+  });
 }
 
 function renderTcFeed(snap) {
