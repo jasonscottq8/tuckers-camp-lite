@@ -52,6 +52,17 @@ Revisit once we know which ones actually bite in real use.
    visible quality loss at the zoom levels the viewer allows. Replace the file
    in `Images/` with the same name; bump the SW version to force the refresh.
 
+## UI changes to make
+
+- **Remove "Tag Animals in Photo" from the trail cam photo expansion / lightbox.**
+  Not needed — a comment or a reaction emoji is enough on a trail cam photo.
+  Remove the tag pill row (`renderTcTagPills` call in `renderTcLightboxBody`,
+  the `#tc-tag-list` block) and the `toggleTcTag` handler. Decide whether to
+  also drop the tag filter on the trail cam feed (`openTcFilterModal`,
+  `tcActiveAnimals`, the "🔍 Filter Photos" button) or keep filtering on
+  existing tags — probably remove it too for consistency. `TC_ANIMALS` and
+  `animalTags` can stay in old docs; just stop reading/writing them.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
