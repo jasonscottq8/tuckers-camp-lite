@@ -280,15 +280,23 @@ body::after {
   background: rgba(5,4,2,0.92);
 }
 
-.login-cabin {
-  width: 100%;
-  max-width: 320px;
-  height: 180px;
-  object-fit: cover;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--gold-dim);
-  margin-bottom: 20px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(196,169,106,0.1);
+.login-logo {
+  width: 152px;
+  height: 152px;
+  object-fit: contain;
+  border-radius: 50%;
+  margin-bottom: 22px;
+  box-shadow:
+    0 0 0 1px rgba(196,169,106,0.22),
+    0 12px 36px rgba(0,0,0,0.6),
+    0 0 44px rgba(196,169,106,0.12);
+}
+
+.header-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .login-title {
@@ -856,6 +864,9 @@ textarea { resize: none; min-height: 80px; }
   animation: fadeIn 0.18s ease;
 }
 .modal-overlay.hidden { display: none; }
+/* the shared appConfirm/appPrompt modal must sit above any hand-rolled overlay
+   that opened it (e.g. the calendar day popup) */
+#app-modal { z-index: 9600; }
 
 .modal-box {
   background: rgba(12, 10, 5, 0.99);

@@ -11,6 +11,9 @@
   <title>Tucker's Camp Lite</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="Images/tuckers-icon-180.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="Images/tuckers-icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="Images/tuckers-icon-512.png" />
 </head>
 <body>
 
@@ -18,7 +21,7 @@
      LOGIN SCREEN
      ============================================================ -->
 <div id="login-screen">
-  <img class="login-cabin" src="Images/cabinpicture.jpg" alt="Tucker's Camp" />
+  <img class="login-logo" src="Images/appiconlogo.png" alt="Tucker's Camp" />
   <h1 class="login-title">Tucker's Camp</h1>
   <p class="login-subtitle">Members Only</p>
 
@@ -86,10 +89,13 @@
 
   <!-- Header -->
   <header id="app-header">
-    <div style="display:flex;align-items:baseline;gap:6px;min-width:0">
-      <h1>Tucker's Camp</h1>
-      <span id="app-version"
-        style="font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:0.3px;white-space:nowrap"></span>
+    <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <img class="header-logo" src="Images/appiconlogo.png" alt="" />
+      <div style="display:flex;align-items:baseline;gap:6px;min-width:0">
+        <h1>Tucker's Camp</h1>
+        <span id="app-version"
+          style="font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:0.3px;white-space:nowrap"></span>
+      </div>
     </div>
     <div class="header-actions">
       <span id="kill-counter-badge"
@@ -412,12 +418,12 @@
       'forceUpdate','selectCmpUser','selectCmpPhoto','toggleCmpSection',
       'openHarvestCompare','loadMoreFeed',
       'goCalendar','renderCalendarScreen','calPrevMonth','calNextMonth','openMapFull',
-      'openCalendarDay','openAddCalendarVisit','saveCalendarVisit','deleteCalendarVisit',
+      'openCalendarDay','openAddCalendarVisit','saveCalendarVisit','deleteCalendarVisit','calPickChip','calBumpSpan',
       'toggleHarvestReactPicker',
       'renderTrophyRoom','refreshTrophyRoom','goMasterTrophyRoom','renderMasterTrophyRoom',
       'toggleTrophySection','toggleTrophyEntry',
-      'switchContestGroup','switchContestTab','openContestEntry','updateContestScore',
-      'submitContestEntry','deleteContestEntry','toggleContestEntry',
+      'switchContestGroup','switchContestTab','toggleContestEntry',
+      'joinContest','leaveContest','refreshContests',
       'closeContest','reopenContest'
     ];
 

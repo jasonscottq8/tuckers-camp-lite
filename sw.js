@@ -1,5 +1,5 @@
 // sw.js — Tucker's Camp Lite
-const APP_VERSION = "lite-2.11.0";
+const APP_VERSION = "lite-2.14.4";
 const CACHE_NAME  = `tuckers-camp-lite-${APP_VERSION}`;
 
 const STATIC_ASSETS = [
@@ -10,8 +10,11 @@ const STATIC_ASSETS = [
   "/firebase.js",
   "/Images/wood-back.jpg",
   "/Images/cabinpicture.jpg",
-  "/Images/icon-192.png",
-  "/Images/icon-512.png"
+  "/Images/appiconlogo.png",
+  "/Images/tuckers-icon-192.png",
+  "/Images/tuckers-icon-512.png",
+  "/Images/tuckers-icon-180.png",
+  "/Images/tuckers-icon-maskable-512.png"
 ];
 
 // Install — skip waiting IMMEDIATELY

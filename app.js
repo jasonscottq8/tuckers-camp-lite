@@ -40,7 +40,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.11.0";
+const APP_VERSION = "lite-2.14.4";
 
 
 
@@ -1272,6 +1272,36 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.14.4", date: "Aug 2026", notes: [
+      "Home-screen app icon reworked — the emblem now fills the icon on a forest-green background, no white ring or box",
+      "To pick it up: delete the app from your home screen, clear the site from your browser's site data, then add it again"
+    ]},
+    { version: "lite-2.14.1", date: "Aug 2026", notes: [
+      "The Tucker's Camp logo now shows on the sign-in screen and in the header"
+    ]},
+    { version: "lite-2.14.0", date: "Aug 2026", notes: [
+      "Calendar days now fill like a gauge — the busier a day is, the taller the fill, with the headcount in the corner",
+      "A packed weekend reads at a glance instead of cramming in names and icons",
+      "Open a day and people are grouped by what they're there for, so a crowd stays easy to read"
+    ]},
+    { version: "lite-2.13.1", date: "Aug 2026", notes: [
+      "You can now set how many days you're staying — a multi-day trip fills the whole span on the calendar with a gold bar",
+      "Fixed the 'Remove visit' confirmation opening behind the day view"
+    ]},
+    { version: "lite-2.13.0", date: "Aug 2026", notes: [
+      "Reworked the calendar day view: weekday, moon phase, and a 'today / in 3 days' label up top",
+      "When you add yourself to a day you can mark why — Hunting, Scouting, Work day, Family, or Just visiting — and morning / evening / all day / overnight",
+      "Those show as icons on the month grid, and days you're on are outlined in gold",
+      "The day view also lists any harvests logged on that date"
+    ]},
+    { version: "lite-2.12.1", date: "Aug 2026", notes: [
+      "Fixed contest entry: logging a buck no longer puts you on the Big Buck board on its own — you still have to press Enter first"
+    ]},
+    { version: "lite-2.12.0", date: "Aug 2026", notes: [
+      "Contests now read your Harvest Log — press Enter to join and your best deer or turkey of the year is ranked automatically",
+      "No more entering an animal twice; update the harvest and your standing updates with it",
+      "Added a weapon field (Firearm / Archery) to deer harvests — firearm bucks go to Big Buck, archery bucks to Bow Buck"
+    ]},
     { version: "lite-2.11.0", date: "Aug 2026", notes: [
       "Added Spring Turkey and Fall Turkey contests",
       "Turkey entries are scored by the NWTF formula — weight + 2× beard + 10× spurs — and the app does the math",
@@ -1466,20 +1496,58 @@ function renderBylawsScreen() {
 
 // ============================================================
 // CONTESTS — Deer (Big Buck / Big Doe / Bow Buck) + Turkey (Spring / Fall)
-// Deer contests rank by a single number the hunter types in. Turkey contests
-// are scored by the NWTF formula: weight + 2×beard + 10×(both spurs).
+// You press one "Enter" button to join. Standings are read straight from the
+// Harvest Log — your best qualifying animal of the year is ranked automatically.
+// Buck contests rank by gross/B&C score; Big Doe by weight; turkeys by the NWTF
+// formula (weight + 2×beard + 10×spurs). Spring/fall split by the harvest month.
 // ============================================================
+function turkeySeason(h) {
+  const d = h.harvestDate?.toDate ? h.harvestDate.toDate() : new Date(h.harvestDate || 0);
+  const m = d.getMonth() + 1;               // 1–12
+  if (m >= 3 && m <= 6) return "spring";
+  if (m >= 8 || m === 1) return "fall";
+  return null;                              // Feb / Jul — no turkey season
+}
+function nwtfFromHarvest(h) {
+  return nwtfScore({ weight: h.weight, beard: h.beardLength, spurL: h.spurLeft, spurR: h.spurRight });
+}
+
 const CONTESTS = {
-  buck:         { label: "Big Buck", short: "Buck", icon: "🦌", group: "deer",   unit: '"',   scoring: "single",
-                  measureLabel: "Gross antler score (inches)", ph: "e.g. 142.5", noun: "buck" },
-  doe:          { label: "Big Doe",  short: "Doe",  icon: "🦌", group: "deer",   unit: ' lbs', scoring: "single",
-                  measureLabel: "Field-dressed weight (lbs)", ph: "e.g. 135", noun: "doe" },
-  bowbuck:      { label: "Bow Buck", short: "Bow",  icon: "🏹", group: "deer",   unit: '"',   scoring: "single",
-                  measureLabel: "Gross antler score (inches)", ph: "e.g. 138", noun: "buck" },
-  springturkey: { label: "Spring Turkey", short: "Spring", icon: "🦃", group: "turkey", unit: "", scoring: "turkey",
-                  noun: "turkey", seasonNote: "Bearded birds — beard and spurs push the score up." },
-  fallturkey:   { label: "Fall Turkey",   short: "Fall",   icon: "🦃", group: "turkey", unit: "", scoring: "turkey",
-                  noun: "turkey", seasonNote: "Either sex — a hen just scores her weight." }
+  buck: {
+    label: "Big Buck", short: "Buck", icon: "🦌", group: "deer", unit: '"', scoring: "single", noun: "buck",
+    seasonNote: "Firearm bucks. Ranked by gross / B&C score.", needField: "a gross / B&C score",
+    metric: h => Number(h.rackScore) || 0,
+    pick:   h => h.species === "deer" && h.deerType === "buck" && h.weapon !== "archery" && Number(h.rackScore) > 0,
+    eligible: h => h.species === "deer" && h.deerType === "buck" && h.weapon !== "archery"
+  },
+  doe: {
+    label: "Big Doe", short: "Doe", icon: "🦌", group: "deer", unit: ' lbs', scoring: "single", noun: "doe",
+    seasonNote: "Ranked by hanging weight.", needField: "its weight",
+    metric: h => Number(h.weight) || 0,
+    pick:   h => h.species === "deer" && h.deerType === "doe" && Number(h.weight) > 0,
+    eligible: h => h.species === "deer" && h.deerType === "doe"
+  },
+  bowbuck: {
+    label: "Bow Buck", short: "Bow", icon: "🏹", group: "deer", unit: '"', scoring: "single", noun: "buck",
+    seasonNote: "Archery bucks. Ranked by gross / B&C score.", needField: "a gross / B&C score",
+    metric: h => Number(h.rackScore) || 0,
+    pick:   h => h.species === "deer" && h.deerType === "buck" && h.weapon === "archery" && Number(h.rackScore) > 0,
+    eligible: h => h.species === "deer" && h.deerType === "buck" && h.weapon === "archery"
+  },
+  springturkey: {
+    label: "Spring Turkey", short: "Spring", icon: "🦃", group: "turkey", unit: "", scoring: "turkey", noun: "turkey",
+    seasonNote: "Spring birds. NWTF score — beard and spurs push it up.", needField: "its weight",
+    metric: nwtfFromHarvest,
+    pick:   h => h.species === "turkey" && turkeySeason(h) === "spring" && Number(h.weight) > 0,
+    eligible: h => h.species === "turkey" && turkeySeason(h) === "spring"
+  },
+  fallturkey: {
+    label: "Fall Turkey", short: "Fall", icon: "🦃", group: "turkey", unit: "", scoring: "turkey", noun: "turkey",
+    seasonNote: "Fall birds, either sex. A hen just scores her weight.", needField: "its weight",
+    metric: nwtfFromHarvest,
+    pick:   h => h.species === "turkey" && turkeySeason(h) === "fall" && Number(h.weight) > 0,
+    eligible: h => h.species === "turkey" && turkeySeason(h) === "fall"
+  }
 };
 const CONTEST_GROUPS = {
   deer:   { label: "Deer",   icon: "🦌", tabs: ["buck", "doe", "bowbuck"],
@@ -1503,16 +1571,65 @@ function contestValueStr(contestId, v) {
 function contestGroupOf(id) { return (CONTESTS[id] && CONTESTS[id].group) || "deer"; }
 function contestAccent() { return CONTEST_GROUPS[contestGroupOf(contestTab)].accent; }
 
-let contestTab        = "buck";
-let contestUnsub      = null;
-let contestMetaUnsub  = null;
-let contestEntries    = [];
-let contestMeta       = null;   // season doc for the active contest+year
-let contestExpanded   = new Set();
-let editingContestId  = null;
+// A member's best qualifying harvest for a contest in a given year → {harvest, score}
+// or null. `loose` also returns a scoreless eligible harvest (e.g. a buck with no
+// B&C score yet) so the board can prompt the owner to fill it in.
+function contestBest(harvests, contestId, uid, year, loose) {
+  const c = CONTESTS[contestId];
+  if (!c) return null;
+  let best = null;
+  harvests.forEach(h => {
+    if (h.uid !== uid) return;
+    const hy = (h.harvestDate?.toDate ? h.harvestDate.toDate() : new Date(h.harvestDate || 0)).getFullYear();
+    if (hy !== year) return;
+    if (loose ? !c.eligible(h) : !c.pick(h)) return;
+    const score = c.pick(h) ? c.metric(h) : null;
+    if (!best || (score != null && (best.score == null || score > best.score))) best = { harvest: h, score };
+  });
+  return best;
+}
+
+// { "<contest>_<year>": [ {uid,name,initials,color,score|null,harvest} ... ] }
+function computeContestStandings(cache) {
+  const out = {};
+  const seen = {};
+  (cache.contestEntries || []).forEach(e => {
+    if (!e.contest || !e.uid) return;
+    // Only genuine "Enter" opt-ins count. Ignore leftover docs from the old
+    // manual-entry system (they have a `measure`/`photoURL` but no `joinedAt`).
+    const isOptIn = e.joinedAt != null || e.id === `${e.contest}_${e.year}_${e.uid}`;
+    if (!isOptIn) return;
+    const yr  = Number(e.year) || contestYear();
+    const key = e.contest + "_" + yr;
+    (seen[key] = seen[key] || new Set());
+    if (seen[key].has(e.uid)) return;
+    seen[key].add(e.uid);
+    const m = cache.members[e.uid] || {};
+    const best = contestBest(cache.harvests, e.contest, e.uid, yr, false)
+             || contestBest(cache.harvests, e.contest, e.uid, yr, true);
+    (out[key] = out[key] || []).push({
+      uid:      e.uid,
+      name:     m.name || e.memberName || "Member",
+      initials: m.initials || e.initials || "?",
+      color:    m.color || e.color || "#556B2F",
+      score:    best && best.score != null ? best.score : null,
+      harvest:  best ? best.harvest : null
+    });
+  });
+  Object.values(out).forEach(list => list.sort((a, b) => {
+    if ((a.score == null) !== (b.score == null)) return a.score == null ? 1 : -1;
+    return (b.score || 0) - (a.score || 0);
+  }));
+  return out;
+}
+
+let contestTab      = "buck";
+let contestExpanded = new Set();   // standings row uids that are open
+let contestData     = null;        // last loadTrophyData() result
 
 function contestYear() { return new Date().getFullYear(); }
 function contestMetaId() { return contestTab + "_" + contestYear(); }
+function contestEntryId(uid) { return contestTab + "_" + contestYear() + "_" + uid; }
 
 function renderContestsScreen() {
   const el = document.getElementById("contests-content");
@@ -1550,7 +1667,7 @@ function renderContestsScreen() {
         <div class="spinner" style="margin:0 auto 12px"></div>Loading…
       </div>
     </div>`;
-  loadContestEntries();
+  loadContestBoard();
 }
 
 window.switchContestGroup = function (gid) {
@@ -1563,155 +1680,172 @@ window.switchContestTab = function (id) {
   if (!CONTESTS[id]) return;
   contestTab = id;
   contestExpanded.clear();
-  contestMeta = null;
-  contestEntries = [];
   renderContestsScreen();
 };
 
-function teardownContestListeners() {
-  if (contestUnsub)     { contestUnsub();     contestUnsub     = null; }
-  if (contestMetaUnsub) { contestMetaUnsub(); contestMetaUnsub = null; }
-}
+// kept as a no-op so showScreen()'s cleanup call stays valid
+function teardownContestListeners() {}
 
-function loadContestEntries() {
-  teardownContestListeners();
+async function loadContestBoard() {
   const board = document.getElementById("contest-board");
   if (!board) return;
-
-  contestMetaUnsub = onSnapshot(doc(db, "contestMeta", contestMetaId()), (snap) => {
-    contestMeta = snap.exists() ? snap.data() : null;
+  try {
+    contestData = await loadTrophyData(false);
     renderContestBoard();
-  }, () => {});
-
-  const qy = query(collection(db, "contestEntries"), where("contest", "==", contestTab));
-  contestUnsub = onSnapshot(qy, (snap) => {
-    const yr = contestYear();
-    contestEntries = snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(e => (e.year || yr) === yr)
-      .sort((a, b) => (Number(b.measure) || 0) - (Number(a.measure) || 0));
-    renderContestBoard();
-  }, err => {
+  } catch (err) {
     console.error(err);
     if (board) board.innerHTML = `<div style="color:var(--danger);padding:16px;font-size:13px">Couldn't load the contest right now.</div>`;
-  });
+  }
 }
+
+window.refreshContests = async function () {
+  try { contestData = await loadTrophyData(true); } catch (_) {}
+  renderContestBoard();
+};
 
 function renderContestBoard() {
   const board = document.getElementById("contest-board");
-  if (!board) return;
+  if (!board || !contestData) return;
   const c        = CONTESTS[contestTab];
+  const yr       = contestYear();
+  const key      = contestTab + "_" + yr;
+  const meta     = contestData.contestMeta[key] || null;
+  const isClosed = !!meta?.closed;
   const isAdmin  = userProfile && userProfile.role === "admin";
-  const isClosed = !!contestMeta?.closed;
-  const canEnter = userProfile && !userProfile.isGuest && !isClosed;
-
-  const enterBtn = canEnter
-    ? `<button class="btn btn-full" onclick="openContestEntry()"
-         style="margin-top:14px;background:${contestAccent()};border:none;color:#fff;font-weight:700">
-         ${c.icon} Enter ${esc(c.label)}
-       </button>`
-    : "";
-
-  // Admin season control
-  const adminCtl = !isAdmin ? "" : (isClosed
-    ? `<button class="btn btn-secondary btn-full btn-sm" onclick="reopenContest()" style="margin-top:10px">
-         Reopen ${contestYear()} season
-       </button>`
-    : (contestEntries.length > 0
-        ? `<button class="btn btn-secondary btn-full btn-sm" onclick="closeContest()" style="margin-top:10px">
-             🏁 End ${contestYear()} season & crown the winner
-           </button>`
-        : ""));
-
-  // Closed banner with the crowned winner
+  const uid      = userProfile && userProfile.uid;
   const isTurkey = c.scoring === "turkey";
-  const banner = (isClosed && contestMeta)
+  const accent   = contestAccent();
+
+  const standings = computeContestStandings(contestData)[key] || [];
+  const mine      = uid ? standings.find(s => s.uid === uid) : null;
+  const entered   = !!mine;
+  const scored    = standings.filter(s => s.score != null);
+
+  // The member entered but their eligible animal is missing its measurement
+  const looseBest = (uid && entered && !mine.score)
+    ? contestBest(contestData.harvests, contestTab, uid, yr, true) : null;
+  const needsData = !!(looseBest && looseBest.harvest);
+
+  const refreshBtn = `<button onclick="refreshContests()" title="Refresh"
+    style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);border-radius:8px;
+           width:30px;height:30px;color:var(--text-muted);cursor:pointer;font-size:14px;flex-shrink:0">↻</button>`;
+
+  // Closed-season winner banner
+  const banner = (isClosed && meta)
     ? `<div style="background:${isTurkey ? "linear-gradient(135deg,rgba(138,109,59,0.22),rgba(178,138,68,0.12))" : "linear-gradient(135deg,rgba(196,169,106,0.18),rgba(212,98,42,0.12))"};
                    border:1px solid ${isTurkey ? "#8a6d3b" : "var(--gold-dim)"};border-radius:var(--radius-lg);
                    padding:14px;margin-bottom:14px;text-align:center">
          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">
-           ${contestYear()} ${esc(c.label)} — Season Closed
+           ${yr} ${esc(c.label)} — Season Closed
          </div>
          <div style="font-size:34px;margin:6px 0 2px">🏆</div>
-         <div style="font-size:16px;font-weight:700;color:var(--gold)">${esc(contestMeta.winnerName || "—")}</div>
-         ${contestMeta.winnerMeasure != null
-           ? `<div style="font-size:13px;color:var(--text-warm)">${esc(contestValueStr(contestTab, contestMeta.winnerMeasure))}</div>` : ""}
+         <div style="font-size:16px;font-weight:700;color:var(--gold)">${esc(meta.winnerName || "—")}</div>
+         ${meta.winnerMeasure != null
+           ? `<div style="font-size:13px;color:var(--text-warm)">${esc(contestValueStr(contestTab, meta.winnerMeasure))}</div>` : ""}
        </div>`
     : "";
 
-  if (contestEntries.length === 0) {
-    board.innerHTML = `
-      ${banner}
-      <div style="text-align:center;padding:40px 0 8px;color:var(--text-muted)">
-        <div style="font-size:44px;margin-bottom:10px">🏆</div>
-        <div style="font-size:14px">No entries yet for ${contestYear()}.</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:4px">
-          ${isClosed ? "This season is closed." : "Be the first on the board."}
-        </div>
-      </div>
-      ${enterBtn}${adminCtl}`;
-    return;
-  }
-
-  const rows = contestEntries.map((e, i) => {
-    const isExp   = contestExpanded.has(e.id);
-    const isOwner = userProfile && (userProfile.uid === e.uid || isAdmin);
-    const canEdit = isOwner && !isClosed;
-    const rank    = i + 1;
-    const medal   = rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
-    const measure = contestValueStr(contestTab, e.measure);
-    const breakdown = (isTurkey && e.weight)
-      ? `<div style="display:inline-block;background:rgba(138,109,59,0.15);border:1px solid #8a6d3b;
-                     border-radius:20px;padding:4px 10px;font-size:11px;color:var(--gold);margin-bottom:10px">
-           ${Number(e.weight)} lb · ${Number(e.beard) || 0}" beard · ${Number(e.spurL) || 0}"/${Number(e.spurR) || 0}" spurs
-         </div>` : "";
+  const standingsRows = standings.map((s, i) => {
+    const isExp  = contestExpanded.has(s.uid);
+    const rank   = i + 1;
+    const medal  = s.score == null ? "·" : rank === 1 ? "🏆" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
+    const val    = s.score != null ? contestValueStr(contestTab, s.score)
+                                   : `<span style="color:var(--text-dim)">waiting on a harvest</span>`;
+    const h      = s.harvest;
+    const detail = h ? [
+      isTurkey ? `${Number(h.weight) || 0} lb · ${Number(h.beardLength) || 0}" beard · ${Number(h.spurLeft) || 0}"/${Number(h.spurRight) || 0}" spurs`
+               : contestTab === "doe" ? `${Number(h.weight) || 0} lb`
+               : `${Number(h.rackScore) || 0}" B&C${h.antlerPoints ? ` · ${h.antlerPoints}-pt` : ""}${h.weight ? ` · ${h.weight} lb` : ""}`,
+      formatDate(h.harvestDate)
+    ].filter(Boolean).join(" · ") : "";
     return `
       <div style="margin-bottom:${isExp ? "0" : "10px"}">
-        <button class="harvest-row-header ${isExp ? "expanded" : ""}" onclick="toggleContestEntry('${e.id}')">
-          <div style="width:34px;text-align:center;font-size:${rank <= 3 ? "18px" : "13px"};
+        <button class="harvest-row-header ${isExp ? "expanded" : ""}" onclick="toggleContestEntry('${s.uid}')"
+          ${!h ? "style=\"opacity:0.6\"" : ""}>
+          <div style="width:34px;text-align:center;font-size:${rank <= 3 && s.score != null ? "18px" : "13px"};
                       font-weight:700;color:var(--gold);flex-shrink:0">${medal}</div>
-          <div class="avatar" style="background:${safeColor(e.color)};width:32px;height:32px;font-size:11px;flex-shrink:0">
-            ${esc(e.initials || "?")}
-          </div>
+          <div class="avatar" style="background:${safeColor(s.color)};width:32px;height:32px;font-size:11px;flex-shrink:0">${esc(s.initials)}</div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:600;color:var(--text-warm);overflow:hidden;
-                        white-space:nowrap;text-overflow:ellipsis">${esc(e.memberName || "Member")}</div>
-            <div style="font-size:12px;color:var(--gold)">${esc(measure)}</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(s.name)}</div>
+            <div style="font-size:12px;color:var(--gold)">${val}</div>
           </div>
-          <span style="color:var(--gold);font-size:18px;flex-shrink:0;transition:transform 0.2s;
-                       ${isExp ? "transform:rotate(90deg)" : ""}">›</span>
+          ${h ? `<span style="color:var(--gold);font-size:18px;flex-shrink:0;transition:transform 0.2s;${isExp ? "transform:rotate(90deg)" : ""}">›</span>` : ""}
         </button>
-        ${isExp ? `
+        ${isExp && h ? `
           <div class="harvest-detail-panel">
-            ${breakdown}
-            ${e.photoURL ? `<img src="${esc(e.photoURL)}"
-              style="width:100%;border-radius:var(--radius-md);border:1px solid var(--card-border);
-                     margin-bottom:10px;display:block" />` : ""}
-            ${e.caption ? `<div style="font-size:13px;color:var(--text-muted);line-height:1.5;
-                                       white-space:pre-wrap;word-break:break-word;margin-bottom:${canEdit ? "10px" : "0"}">${esc(e.caption)}</div>` : ""}
-            ${canEdit ? `
-              <div style="display:flex;gap:8px">
-                <button class="btn btn-secondary btn-sm" onclick="openContestEntry('${e.id}')">✏️ Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteContestEntry('${e.id}')">🗑 Delete</button>
-              </div>` : ""}
+            ${h.photoURL ? `<img src="${esc(h.photoURL)}"
+              style="width:100%;border-radius:var(--radius-md);border:1px solid var(--card-border);margin-bottom:10px;display:block" />` : ""}
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${esc(detail)}</div>
+            <button class="btn btn-secondary btn-sm btn-full" onclick="goHarvest()">View in the Harvest Log</button>
           </div>` : ""}
       </div>`;
   }).join("");
 
-  board.innerHTML = banner + rows + enterBtn + adminCtl;
+  // Bottom action area
+  let action = "";
+  if (!userProfile || userProfile.isGuest) {
+    action = "";
+  } else if (isClosed) {
+    action = isAdmin
+      ? `<button class="btn btn-secondary btn-full btn-sm" onclick="reopenContest()" style="margin-top:12px">Reopen ${yr} season</button>` : "";
+  } else if (!entered) {
+    action = `<button class="btn btn-full" onclick="joinContest()"
+        style="margin-top:14px;background:${accent};border:none;color:#fff;font-weight:700">
+        ${c.icon} Enter ${esc(c.label)}</button>`;
+  } else {
+    if (needsData) {
+      action = `<div style="background:rgba(212,98,42,0.12);border:1px solid rgba(212,98,42,0.4);border-radius:var(--radius-lg);
+                    padding:12px 14px;margin-top:14px">
+          <div style="font-size:13px;color:var(--text-warm);margin-bottom:8px">You're entered, but your ${c.noun} needs ${c.needField} added before it counts.</div>
+          <button class="btn btn-secondary btn-sm btn-full" onclick="openEditHarvest('${looseBest.harvest.id}')">Edit my ${c.noun}</button>
+        </div>`;
+    } else if (!mine.score) {
+      action = `<div style="background:rgba(196,169,106,0.1);border:1px solid var(--gold-dim);border-radius:var(--radius-lg);
+                    padding:12px 14px;margin-top:14px">
+          <div style="font-size:13px;color:var(--text-warm);margin-bottom:8px">You're in the ${esc(c.label)}. Log your ${c.noun} in the Harvest Log and your standing updates automatically.</div>
+          <button class="btn btn-secondary btn-sm btn-full" onclick="openAddHarvest()">Log a harvest</button>
+        </div>`;
+    }
+    action += `<button class="btn btn-ghost btn-sm btn-full" onclick="leaveContest()" style="margin-top:8px;color:var(--text-dim);font-size:12px">Leave contest</button>`;
+  }
+
+  const adminClose = (isAdmin && !isClosed && scored.length)
+    ? `<button class="btn btn-secondary btn-full btn-sm" onclick="closeContest()" style="margin-top:10px">🏁 End ${yr} season & crown the winner</button>` : "";
+
+  const header = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-muted)">${standings.length} ${standings.length === 1 ? "entrant" : "entrants"}${scored.length < standings.length ? ` · ${scored.length} scored` : ""}</div>
+      ${refreshBtn}
+    </div>`;
+
+  if (standings.length === 0) {
+    board.innerHTML = `${banner}${header}
+      <div style="text-align:center;padding:36px 0 8px;color:var(--text-muted)">
+        <div style="font-size:44px;margin-bottom:10px">🏆</div>
+        <div style="font-size:14px">${isClosed ? "This season is closed." : "No one's entered yet."}</div>
+        ${!isClosed ? `<div style="font-size:12px;color:var(--text-dim);margin-top:4px">Press Enter, then log your ${c.noun} — the board reads your Harvest Log.</div>` : ""}
+      </div>
+      ${action}${adminClose}`;
+    return;
+  }
+
+  board.innerHTML = banner + header + standingsRows + action + adminClose;
 }
 
 window.closeContest = function () {
   if (!userProfile || userProfile.role !== "admin") return;
-  const c = CONTESTS[contestTab];
-  const winner = contestEntries[0];
-  if (!winner) { showToast("No entries to crown yet.", "error"); return; }
+  const c   = CONTESTS[contestTab];
+  const key = contestMetaId();
+  const standings = (contestData ? computeContestStandings(contestData)[key] : null) || [];
+  const scored = standings.filter(s => s.score != null);
+  const winner = scored[0];
+  if (!winner) { showToast("Nobody has a scored harvest yet.", "error"); return; }
+  const snapshot = scored.slice(0, 3).map(s => ({ uid: s.uid, name: s.name, score: s.score }));
   appConfirm(
     "End the Season",
-    `Close the ${contestYear()} ${c.label} contest? ${winner.memberName} takes it with ${contestValueStr(contestTab, winner.measure)}. No new entries after this — you can reopen it later.`,
+    `Close the ${contestYear()} ${c.label} contest? ${winner.name} takes it with ${contestValueStr(contestTab, winner.score)}. No new entries after this — you can reopen it later.`,
     async () => {
       try {
-        await setDoc(doc(db, "contestMeta", contestMetaId()), {
+        await setDoc(doc(db, "contestMeta", key), {
           contest:        contestTab,
           year:           contestYear(),
           closed:         true,
@@ -1719,17 +1853,20 @@ window.closeContest = function () {
           closedByUid:    userProfile.uid,
           closedByName:   userProfile.displayName,
           winnerUid:      winner.uid || null,
-          winnerName:     winner.memberName || null,
-          winnerMeasure:  Number(winner.measure) || 0,
-          winnerPhotoURL: winner.photoURL || null
+          winnerName:     winner.name || null,
+          winnerMeasure:  Number(winner.score) || 0,
+          winnerPhotoURL: winner.harvest?.photoURL || null,
+          standings:      snapshot
         }, { merge: true });
         await postAutoFeedEvent("contest", {
-          winnerName:   winner.memberName || "A member",
+          winnerName:   winner.name || "A member",
           contestLabel: c.label,
           year:         contestYear(),
-          measure:      contestValueStr(contestTab, winner.measure)
+          measure:      contestValueStr(contestTab, winner.score)
         });
-        showToast(`${c.label} season closed — 🏆 ${winner.memberName}`, "success");
+        trophyCache = null;
+        showToast(`${c.label} season closed — 🏆 ${winner.name}`, "success");
+        refreshContests();
       } catch (err) { console.error(err); showToast("Could not close the season.", "error"); }
     }
   );
@@ -1740,7 +1877,9 @@ window.reopenContest = function () {
   appConfirm("Reopen Season", `Reopen the ${contestYear()} ${CONTESTS[contestTab].label} contest for entries?`, async () => {
     try {
       await setDoc(doc(db, "contestMeta", contestMetaId()), { closed: false }, { merge: true });
+      trophyCache = null;
       showToast("Season reopened.", "success");
+      refreshContests();
     } catch (err) { console.error(err); showToast("Could not reopen.", "error"); }
   });
 };
@@ -1751,156 +1890,51 @@ window.toggleContestEntry = function (id) {
   renderContestBoard();
 };
 
-window.openContestEntry = function (id) {
+// Join a contest for the year — one opt-in doc, deterministic id so it's
+// idempotent. Standings come from the Harvest Log, not from here.
+window.joinContest = async function () {
   if (!userProfile || userProfile.isGuest) { showToast("Sign in to enter.", "error"); return; }
-  editingContestId = id || null;
-  const c    = CONTESTS[contestTab];
-  const e    = id ? contestEntries.find(x => x.id === id) || {} : {};
-  const ov = document.createElement("div");
-  ov.className = "modal-overlay"; ov.id = "contest-entry-overlay";
-  const num = (id, label, val, ph) => `
-    <div class="input-group" style="margin-bottom:0">
-      <label style="font-size:11px">${label}</label>
-      <input type="number" id="${id}" inputmode="decimal" step="0.0625" min="0"
-        placeholder="${ph}" value="${val != null ? esc(val) : ""}" oninput="updateContestScore()" />
-    </div>`;
-  const scoreBlock = c.scoring === "turkey"
-    ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
-         ${num("ct-weight", "Weight (lbs) *", e.weight, "21.5")}
-         ${num("ct-beard",  "Beard length (in)", e.beard, "10")}
-         ${num("ct-spurl",  "Left spur (in)", e.spurL, "1.25")}
-         ${num("ct-spurr",  "Right spur (in)", e.spurR, "1.25")}
-       </div>
-       <div style="background:rgba(138,109,59,0.12);border:1px solid #8a6d3b;border-radius:var(--radius-md);
-                   padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-         <span style="font-size:12px;color:var(--text-muted)">NWTF score</span>
-         <span id="contest-score" style="font-size:18px;font-weight:700;color:var(--gold)">
-           ${e.measure != null ? Number(e.measure).toFixed(1) : "0.0"}</span>
-       </div>
-       <div style="font-size:10px;color:var(--text-dim);margin-bottom:14px">weight + 2 × beard + 10 × both spurs</div>`
-    : `<div class="input-group" style="margin-bottom:12px">
-         <label>${esc(c.measureLabel)}</label>
-         <input type="number" id="contest-measure" inputmode="decimal" step="0.1" min="0"
-           placeholder="${esc(c.ph)}" value="${e.measure != null ? esc(e.measure) : ""}" />
-       </div>`;
-  ov.innerHTML = `
-    <div class="modal-box" style="max-width:360px;max-height:90vh;overflow-y:auto">
-      <div class="modal-title">${c.icon} ${editingContestId ? "Edit Entry" : "Enter " + esc(c.label)}</div>
-      ${scoreBlock}
-      <div class="input-group" style="margin-bottom:12px">
-        <label>Notes (optional)</label>
-        <textarea id="contest-caption" maxlength="240"
-          placeholder="Where, when, points, story…">${esc(e.caption || "")}</textarea>
-      </div>
-      <div class="input-group" style="margin-bottom:16px">
-        <label>Photo${editingContestId && e.photoURL ? " (leave blank to keep current)" : ""}</label>
-        <div style="display:flex;align-items:center;gap:10px">
-          <button class="btn btn-primary btn-sm" type="button"
-            onclick="document.getElementById('contest-photo').click()">📷 Choose Photo</button>
-          <span id="contest-photo-name" style="font-size:12px;color:var(--text-muted)">
-            ${editingContestId && e.photoURL ? "Current photo kept" : "No file chosen"}
-          </span>
-        </div>
-        <input type="file" id="contest-photo" accept="image/*" style="display:none"
-          onchange="document.getElementById('contest-photo-name').textContent=this.files[0]?.name||'No file chosen'" />
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('contest-entry-overlay').remove()">Cancel</button>
-        <button class="btn btn-primary btn-sm" id="contest-submit-btn" onclick="submitContestEntry()">
-          ${editingContestId ? "Save" : "Submit Entry"}
-        </button>
-      </div>
-    </div>`;
-  document.body.appendChild(ov);
-};
-
-window.updateContestScore = function () {
-  const el = document.getElementById("contest-score");
-  if (!el) return;
-  el.textContent = nwtfScore({
-    weight: document.getElementById("ct-weight")?.value,
-    beard:  document.getElementById("ct-beard")?.value,
-    spurL:  document.getElementById("ct-spurl")?.value,
-    spurR:  document.getElementById("ct-spurr")?.value
-  }).toFixed(1);
-};
-
-window.submitContestEntry = async function () {
-  if (!userProfile || userProfile.isGuest) return;
-  if (contestMeta?.closed) { showToast("This season is closed.", "error"); return; }
-  const cfg = CONTESTS[contestTab];
-  let measure, turkeyFields = null;
-  if (cfg.scoring === "turkey") {
-    turkeyFields = {
-      weight: parseFloat(document.getElementById("ct-weight")?.value) || 0,
-      beard:  parseFloat(document.getElementById("ct-beard")?.value)  || 0,
-      spurL:  parseFloat(document.getElementById("ct-spurl")?.value)  || 0,
-      spurR:  parseFloat(document.getElementById("ct-spurr")?.value)  || 0
-    };
-    if (!(turkeyFields.weight > 0)) { showToast("Enter the bird's weight.", "error"); return; }
-    measure = nwtfScore(turkeyFields);
-  } else {
-    measure = parseFloat(document.getElementById("contest-measure")?.value);
-  }
-  const caption = document.getElementById("contest-caption")?.value.trim() || "";
-  const file    = document.getElementById("contest-photo")?.files?.[0] || null;
-  const btn     = document.getElementById("contest-submit-btn");
-  const existing = editingContestId ? contestEntries.find(x => x.id === editingContestId) : null;
-
-  if (!(measure > 0)) { showToast(cfg.scoring === "turkey" ? "Fill in the bird's measurements." : "Enter a measurement.", "error"); return; }
-  if (!file && !existing?.photoURL) { showToast(`Add a photo of your ${CONTESTS[contestTab].noun}.`, "error"); return; }
-  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
-
+  const c   = CONTESTS[contestTab];
+  const key = contestMetaId();
+  if (contestData?.contestMeta?.[key]?.closed) { showToast("This season is closed.", "error"); return; }
   try {
-    let photoURL = existing?.photoURL || null;
-    if (file) {
-      if (btn) btn.textContent = "Uploading photo…";
-      const compressed = await compressImage(file);
-      const path = `contests/${contestYear()}/${contestTab}/${userProfile.uid}_${Date.now()}.jpg`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, compressed, { contentType: "image/jpeg" });
-      photoURL = await getDownloadURL(storageRef);
-    }
-    if (btn) btn.textContent = "Saving…";
-
-    const payload = {
+    await setDoc(doc(db, "contestEntries", contestEntryId(userProfile.uid)), {
       contest:    contestTab,
       year:       contestYear(),
-      measure,
-      caption,
-      photoURL,
       uid:        userProfile.uid,
       memberName: userProfile.displayName,
       initials:   userProfile.initials,
       color:      userProfile.color,
-      updatedAt:  serverTimestamp()
-    };
-    if (turkeyFields) Object.assign(payload, turkeyFields, { scoring: "turkey" });
-
-    if (editingContestId) {
-      await updateDoc(doc(db, "contestEntries", editingContestId), payload);
-    } else {
-      payload.createdAt = serverTimestamp();
-      await addDoc(collection(db, "contestEntries"), payload);
-    }
-    document.getElementById("contest-entry-overlay")?.remove();
-    showToast(editingContestId ? "Entry updated!" : "You're on the board! 🏆", "success");
-  } catch (err) {
-    console.error(err);
-    showToast("Could not save entry: " + err.message, "error");
-    if (btn) { btn.disabled = false; btn.textContent = editingContestId ? "Save" : "Submit Entry"; }
-  }
+      joinedAt:   serverTimestamp()
+    });
+    trophyCache = null;
+    showToast(`You're in the ${c.label}. 🏆`, "success");
+    await refreshContests();
+  } catch (err) { console.error(err); showToast("Couldn't enter right now.", "error"); }
 };
 
-window.deleteContestEntry = function (id) {
-  appConfirm("Delete Entry", "Remove this contest entry?", async () => {
-    try {
-      await deleteDoc(doc(db, "contestEntries", id));
-      contestExpanded.delete(id);
-      showToast("Entry removed.", "success");
-    } catch (err) { console.error(err); showToast("Could not delete.", "error"); }
-  });
-}
+window.leaveContest = function () {
+  if (!userProfile) return;
+  const c = CONTESTS[contestTab];
+  appConfirm(
+    "Leave contest",
+    `Leave the ${contestYear()} ${c.label}? Your harvest stays in the log — it just won't be ranked here.`,
+    async () => {
+      try {
+        const uid = userProfile.uid;
+        const ids = new Set([contestEntryId(uid)]);
+        (contestData?.contestEntries || []).forEach(e => {
+          if (e.uid === uid && e.contest === contestTab && Number(e.year) === contestYear()) ids.add(e.id);
+        });
+        await Promise.all([...ids].map(id => deleteDoc(doc(db, "contestEntries", id)).catch(() => {})));
+        contestExpanded.delete(uid);
+        trophyCache = null;
+        showToast("You've left the contest.", "success");
+        await refreshContests();
+      } catch (err) { console.error(err); showToast("Couldn't leave right now.", "error"); }
+    }
+  );
+};
 
 // ============================================================
 // ADMIN LOG UTILITY
@@ -3168,6 +3202,24 @@ window.updateHarvestFields = function (existingData) {
             </label>
           </div>
         </div>
+        <div class="input-group" style="margin-bottom:12px">
+          <label>Weapon</label>
+          <div style="display:flex;gap:8px">
+            <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 12px;
+                          background:rgba(255,255,255,0.05);border:1px solid var(--card-border);
+                          border-radius:var(--radius-md);cursor:pointer;font-size:13px">
+              <input type="radio" name="deer-weapon" value="firearm" ${d.weapon!=="archery"?"checked":""} />
+              <span>🔫 Firearm</span>
+            </label>
+            <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 12px;
+                          background:rgba(255,255,255,0.05);border:1px solid var(--card-border);
+                          border-radius:var(--radius-md);cursor:pointer;font-size:13px">
+              <input type="radio" name="deer-weapon" value="archery" ${d.weapon==="archery"?"checked":""} />
+              <span>🏹 Archery</span>
+            </label>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Firearm = gun or muzzleloader · Archery = bow or crossbow</div>
+        </div>
         <div id="deer-buck-fields" style="${d.deerType==="doe"?"display:none":""}">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div class="input-group">
@@ -3347,9 +3399,10 @@ window.saveHarvest = async function () {
     const waterfowlType = document.getElementById("hf-waterfowl-type")?.value        || null;
     const smallgameType = document.getElementById("hf-smallgame-type")?.value        || null;
     const quantity      = parseInt(document.getElementById("hf-quantity")?.value)    || 1;
+    const weapon        = document.querySelector('input[name="deer-weapon"]:checked')?.value || (species === "deer" ? "firearm" : null);
 
     const payload = {
-      species, notes, weight, photoURL,
+      species, notes, weight, photoURL, weapon,
       deerType, turkeySex, antlerPoints, insideSpread, rackScore,
       beardLength, spurLeft, spurRight, bearColor,
       waterfowlType, smallgameType, quantity,
@@ -4562,8 +4615,114 @@ window.saveTcPhotos = async function () {
 // ============================================================
 let calCurrentYear  = new Date().getFullYear();
 let calCurrentMonth = new Date().getMonth(); // 0-indexed
-let calVisitDocs    = {};  // { "YYYY-MM-DD": [visits] }
+let calVisitDocs    = {};  // { "YYYY-MM-DD": [visits starting that day] }  — feeds the month list
+let calVisitList    = [];  // flat list of every loaded visit — feeds multi-day grid coverage
 let calUnsub        = null;
+
+const CAL_MAX_SPAN = 21;  // longest stay you can log, in days
+
+// local YYYY-MM-DD (matches the grid's dateStr, unlike toISOString which is UTC)
+function calDayKey(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function visitStartDate(v) {
+  const s = v.visitDate?.toDate ? v.visitDate.toDate() : new Date(v.visitDate || 0);
+  return new Date(s.getFullYear(), s.getMonth(), s.getDate());
+}
+function visitSpan(v) { return Math.min(CAL_MAX_SPAN, Math.max(1, Number(v.spanDays) || 1)); }
+// which day of the stay does `dateStr` fall on? 0-based, or -1 if outside the range
+function visitDayOffset(v, dateStr) {
+  const diff = Math.round((new Date(dateStr + "T00:00:00") - visitStartDate(v)) / 86400000);
+  return (diff >= 0 && diff < visitSpan(v)) ? diff : -1;
+}
+function visitsOnDay(dateStr) { return calVisitList.filter(v => visitDayOffset(v, dateStr) >= 0); }
+// "Sep 4" or "Sep 4 – 8" / "Sep 30 – Oct 3"
+function visitRangeLabel(v) {
+  const s = visitStartDate(v), span = visitSpan(v);
+  const e = new Date(s); e.setDate(e.getDate() + span - 1);
+  const fmt = dd => dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (span === 1) return fmt(s);
+  return s.getMonth() === e.getMonth() ? `${fmt(s)} – ${e.getDate()}` : `${fmt(s)} – ${fmt(e)}`;
+}
+
+// Why someone's at camp — drives the icon on the calendar grid
+const VISIT_PURPOSES = {
+  hunting:  { label: "Hunting",       icon: "🎯", color: "#d4622a" },
+  scouting: { label: "Scouting",      icon: "👀", color: "#6b8f3b" },
+  work:     { label: "Work day",      icon: "🔨", color: "#b28a44" },
+  family:   { label: "Family",        icon: "🏡", color: "#9b7bb0" },
+  visiting: { label: "Just visiting", icon: "👋", color: "#5a8fa8" }
+};
+const DAY_PARTS = {
+  morning:   { label: "Morning",   icon: "🌅" },
+  evening:   { label: "Evening",   icon: "🌆" },
+  allday:    { label: "All day",   icon: "☀️" },
+  overnight: { label: "Overnight", icon: "🌙" }
+};
+function visitPurpose(v)  { return VISIT_PURPOSES[v && v.purpose] || null; }
+function visitDayPart(v)  { return DAY_PARTS[v && v.dayPart] || null; }
+
+// Approximate moon phase for a date — hunters read the moon, so show it.
+function moonPhase(date) {
+  const SYNODIC = 29.530588853;
+  const knownNew = Date.UTC(2000, 0, 6, 18, 14) / 86400000;   // 2000-01-06 new moon
+  const now = date.getTime() / 86400000;
+  const frac = (((now - knownNew) % SYNODIC) + SYNODIC) % SYNODIC / SYNODIC;
+  const table = [
+    { name: "New moon",        icon: "🌑" },
+    { name: "Waxing crescent", icon: "🌒" },
+    { name: "First quarter",   icon: "🌓" },
+    { name: "Waxing gibbous",  icon: "🌔" },
+    { name: "Full moon",       icon: "🌕" },
+    { name: "Waning gibbous",  icon: "🌖" },
+    { name: "Last quarter",    icon: "🌗" },
+    { name: "Waning crescent", icon: "🌘" }
+  ];
+  return table[Math.round(frac * 8) % 8];
+}
+
+// "Today" / "Tomorrow" / "In 5 days" / "3 weeks ago"
+function relativeDayLabel(dateStr) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr + "T00:00:00");
+  const diff = Math.round((d - today) / 86400000);
+  if (diff === 0)  return "Today";
+  if (diff === 1)  return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  const ad = Math.abs(diff);
+  if (ad <= 13)  return diff > 0 ? `In ${diff} days` : `${ad} days ago`;
+  const wk = Math.round(ad / 7);
+  return diff > 0 ? `In ${wk} week${wk !== 1 ? "s" : ""}` : `${wk} week${wk !== 1 ? "s" : ""} ago`;
+}
+
+// chip picker inside the day popup — single-select within a group
+window.calPickChip = function (btn, group) {
+  const wrap = btn.parentElement;
+  wrap.querySelectorAll("button[data-" + group + "]").forEach(b => {
+    const on = b === btn && !b.classList.contains("cal-chip-on");
+    b.classList.toggle("cal-chip-on", on);
+    b.style.background   = on ? "var(--gold)" : "rgba(255,255,255,0.05)";
+    b.style.color        = on ? "#241206" : "var(--text-warm)";
+    b.style.borderColor  = on ? "transparent" : "var(--card-border)";
+    b.style.fontWeight   = on ? "700" : "500";
+  });
+};
+
+// day-count stepper inside the day popup
+window.calBumpSpan = function (delta) {
+  const inp  = document.getElementById("cal-visit-span");
+  const hint = document.getElementById("cal-span-hint");
+  const ov   = document.getElementById("cal-day-overlay");
+  if (!inp) return;
+  const n = Math.min(CAL_MAX_SPAN, Math.max(1, (Number(inp.value) || 1) + delta));
+  inp.value = n;
+  if (!hint) return;
+  if (n === 1) { hint.textContent = "Just this day"; return; }
+  const s = new Date((ov?.dataset.date || "") + "T00:00:00");
+  const e = new Date(s); e.setDate(e.getDate() + n - 1);
+  const f = dd => dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  hint.textContent = `${n} days · ${f(s)} – ${s.getMonth() === e.getMonth() ? e.getDate() : f(e)}`;
+};
 
 window.goCalendar = function () {
   showScreen("screen-calendar");
@@ -4586,7 +4745,9 @@ window.renderCalendarScreen = async function () {
 async function loadCalendarMonth(year, month) {
   if (calUnsub) { calUnsub(); calUnsub = null; }
 
-  const start = new Date(year, month, 1);
+  // widen the window back a few weeks so a multi-day stay that began in the
+  // previous month still shows on this month's opening days
+  const start = new Date(year, month, 1 - CAL_MAX_SPAN);
   const end   = new Date(year, month + 1, 0, 23, 59, 59);
 
   try {
@@ -4597,16 +4758,20 @@ async function loadCalendarMonth(year, month) {
     ));
 
     calVisitDocs = {};
+    calVisitList = [];
     snap.docs.forEach(d => {
-      const data = d.data();
-      const date = data.visitDate?.toDate ? data.visitDate.toDate() : new Date(data.visitDate);
-      const key  = date.toISOString().split("T")[0];
-      if (!calVisitDocs[key]) calVisitDocs[key] = [];
-      calVisitDocs[key].push({ id: d.id, ...data });
+      const data = { id: d.id, ...d.data() };
+      calVisitList.push(data);
+      const s = data.visitDate?.toDate ? data.visitDate.toDate() : new Date(data.visitDate);
+      if (s.getFullYear() === year && s.getMonth() === month) {
+        const key = calDayKey(s);
+        (calVisitDocs[key] = calVisitDocs[key] || []).push(data);
+      }
     });
   } catch(err) {
     console.error(err);
     calVisitDocs = {};
+    calVisitList = [];
   }
 }
 
@@ -4632,43 +4797,37 @@ function renderCalendarGrid(el) {
     </div>`;
   }
 
-  // Off-cream fill for ordinary days; today and visited days keep their accents.
+  // Off-cream fill for ordinary days; today keeps its accent.
   const DAY_BG = "rgba(237,226,200,0.06)";
 
-  // Current month days
+  // Current month days — an occupancy gauge: the cell fills from the bottom and
+  // prints a headcount. Busier day = taller, slightly deeper fill.
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr    = year + "-" + String(month+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
-    const visits     = calVisitDocs[dateStr] || [];
+    const dayVisits  = visitsOnDay(dateStr);
+    const count      = new Set(dayVisits.map(v => v.uid)).size;
     const isToday    = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-    const hasVisit   = visits.length > 0;
-    const dayBg      = isToday ? "rgba(196,169,106,0.12)" : hasVisit ? "rgba(212,98,42,0.08)" : DAY_BG;
+    const mineHere   = userProfile && dayVisits.some(v => v.uid === userProfile.uid);
 
-    // Unique visitor avatars (up to 3)
-    const visitors   = [...new Map(visits.map(v => [v.uid, v])).values()].slice(0, 3);
+    const ramp   = count ? Math.min(1, (count - 1) / 7) : 0;   // 1 person … 8+ = full
+    const fillH  = count ? Math.round(20 + ramp * 72) : 0;      // % of cell height
+    const fillA  = (0.15 + ramp * 0.27).toFixed(2);             // fill opacity
+    const border = mineHere ? "var(--gold)" : isToday ? "var(--gold-dim)" : "rgba(237,226,200,0.10)";
+    const baseBg = isToday ? "rgba(196,169,106,0.10)" : DAY_BG;
 
     cells += `
       <div onclick="openCalendarDay('${dateStr}')"
-        style="aspect-ratio:1;padding:4px;border-radius:var(--radius-md);cursor:pointer;
-               background:${dayBg};
-               border:1px solid ${isToday ? "var(--gold-dim)" : hasVisit ? "rgba(212,98,42,0.25)" : "rgba(237,226,200,0.10)"};
-               transition:background 0.15s;display:flex;flex-direction:column;
-               align-items:center;justify-content:space-between;min-height:44px"
-        onmouseover="this.style.background='rgba(255,255,255,0.06)'"
-        onmouseout="this.style.background='${dayBg}'">
-        <div style="font-size:13px;font-weight:${isToday?"700":"400"};
-                    color:${isToday ? "var(--gold)" : "var(--text-warm)"};
-                    align-self:flex-end">${d}</div>
-        ${hasVisit ? `
-          <div style="display:flex;gap:-4px;margin-top:2px">
-            ${visitors.map(v => `
-              <div style="width:16px;height:16px;border-radius:50%;
-                          background:${safeColor(v.visitorColor)};
-                          font-size:8px;display:flex;align-items:center;
-                          justify-content:center;color:#fff;font-weight:700;
-                          margin-right:-4px;border:1px solid rgba(0,0,0,0.3)">
-                ${esc((v.visitorInitials||"?").slice(0,1))}
-              </div>`).join("")}
-          </div>` : ""}
+        style="position:relative;overflow:hidden;aspect-ratio:1;border-radius:var(--radius-md);
+               cursor:pointer;background:${baseBg};border:1px solid ${border};min-height:44px"
+        onmouseover="this.style.borderColor='var(--gold)'"
+        onmouseout="this.style.borderColor='${border}'">
+        ${fillH ? `<div style="position:absolute;left:0;right:0;bottom:0;height:${fillH}%;
+                     background:rgba(212,98,42,${fillA})"></div>` : ""}
+        <div style="position:absolute;top:3px;right:5px;font-size:13px;
+                    font-weight:${isToday ? "700" : "400"};
+                    color:${isToday ? "var(--gold)" : "var(--text-warm)"}">${d}</div>
+        ${count ? `<div style="position:absolute;left:5px;bottom:2px;font-size:12px;font-weight:700;
+                     color:var(--text-warm);font-variant-numeric:tabular-nums">${count}</div>` : ""}
       </div>`;
   }
 
@@ -4742,21 +4901,26 @@ function renderCalendarGrid(el) {
                     <div style="font-size:13px;font-weight:600;color:var(--gold);margin-bottom:8px">
                       ${label}
                     </div>
-                    ${visits.map(v => `
+                    ${visits.map(v => {
+                      const p = visitPurpose(v), dp = visitDayPart(v);
+                      const spanTag = visitSpan(v) > 1 ? `📅 ${visitRangeLabel(v)}` : "";
+                      const tags = [p ? `${p.icon} ${p.label}` : "", dp ? `${dp.icon} ${dp.label}` : "", spanTag].filter(Boolean).join("  ·  ");
+                      return `
                       <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
                         <div class="avatar" style="background:${safeColor(v.visitorColor)};
                              width:28px;height:28px;font-size:10px;flex-shrink:0">
                           ${esc(v.visitorInitials||"?")}
                         </div>
-                        <div style="flex:1">
+                        <div style="flex:1;min-width:0">
                           <div style="font-size:13px;color:var(--text-warm)">${esc(v.visitorName||"Unknown")}</div>
-                          ${v.notes ? `<div style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word">${esc(v.notes)}</div>` : ""}
+                          ${tags ? `<div style="font-size:11px;color:var(--text-muted)">${tags}</div>` : ""}
+                          ${v.notes && v.notes !== "Checked in via app" ? `<div style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word">${esc(v.notes)}</div>` : ""}
                         </div>
                         ${(userProfile?.uid === v.uid || userProfile?.role === "admin") ? `
                           <button onclick="deleteCalendarVisit('${v.id}')"
                             style="background:none;border:none;color:var(--text-dim);
                                    font-size:14px;cursor:pointer">🗑</button>` : ""}
-                      </div>`).join("")}
+                      </div>`;}).join("")}
                   </div>`;
               }).join("")}
       </div>
@@ -4783,51 +4947,203 @@ window.calNextMonth = async function () {
 };
 
 window.openCalendarDay = function (dateStr) {
-  const visits = calVisitDocs[dateStr] || [];
+  const visits = visitsOnDay(dateStr);
   const d      = new Date(dateStr + "T12:00:00");
-  const label  = d.toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
+  const uid    = userProfile && userProfile.uid;
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+  const monthAb = d.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+  const rel     = relativeDayLabel(dateStr);
+  const moon    = moonPhase(d);
+  const isPast  = new Date(dateStr + "T23:59:59") < new Date();
+  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+
+  const uniqueUids = [...new Set(visits.map(v => v.uid))];
+  const myVisits   = visits.filter(v => v.uid === uid);
+  const planLine   = uniqueUids.length === 0 ? ""
+    : isPast
+      ? `${uniqueUids.length} ${uniqueUids.length === 1 ? "member was" : "members were"} at camp`
+      : `${uniqueUids.length} ${uniqueUids.length === 1 ? "member is" : "members are"} planning to be there`;
+
+  const visitCard = v => {
+    const dp = visitDayPart(v);
+    const mine = v.uid === uid;
+    const canDel = mine || (userProfile && userProfile.role === "admin");
+    const span = visitSpan(v);
+    const off  = visitDayOffset(v, dateStr);   // 0-based day of the stay
+    const bits = [
+      dp ? `${dp.icon} ${dp.label}` : "",
+      span > 1 ? `📅 ${esc(visitRangeLabel(v))} · day ${off + 1} of ${span}` : "",
+      v.isCheckin ? "📍 checked in" : ""
+    ].filter(Boolean).join("  ·  ");
+    return `
+      <div style="display:flex;align-items:flex-start;gap:9px;padding:8px 9px;border-radius:var(--radius-md);
+                  background:${mine ? "rgba(196,169,106,0.10)" : "rgba(255,255,255,0.03)"};
+                  border:1px solid ${mine ? "var(--gold-dim)" : "var(--card-border)"};margin-bottom:6px">
+        <div class="avatar" style="background:${safeColor(v.visitorColor)};width:28px;height:28px;font-size:10px;flex-shrink:0">
+          ${esc((v.visitorInitials || "?"))}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--text-warm);font-weight:600">${esc(v.visitorName || "Unknown")}${mine ? " (you)" : ""}</div>
+          ${bits ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${bits}</div>` : ""}
+          ${v.notes && v.notes !== "Checked in via app"
+            ? `<div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word;margin-top:4px">${esc(v.notes)}</div>` : ""}
+        </div>
+        ${canDel ? `<button onclick="deleteCalendarVisit('${v.id}')"
+          style="background:none;border:none;color:var(--text-dim);font-size:14px;cursor:pointer;flex-shrink:0">🗑</button>` : ""}
+      </div>`;
+  };
+
+  // group the roster by purpose so a crowded day stays scannable
+  function rosterHTML() {
+    const buckets = {};
+    visits.forEach(v => {
+      const k = (v.purpose && VISIT_PURPOSES[v.purpose]) ? v.purpose : "_none";
+      (buckets[k] = buckets[k] || []).push(v);
+    });
+    const keys = [...Object.keys(VISIT_PURPOSES).filter(k => buckets[k]),
+                  ...(buckets._none ? ["_none"] : [])];
+    return keys.map(k => {
+      const m = VISIT_PURPOSES[k];
+      const list = buckets[k];
+      const head = m
+        ? `<span style="font-size:11px;background:${m.color}22;border:1px solid ${m.color}55;color:var(--text-warm);border-radius:20px;padding:2px 9px">${m.icon} ${m.label}</span>`
+        : `<span style="font-size:11px;color:var(--text-muted)">Heading up — no plan set</span>`;
+      return `<div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+          ${head}<span style="font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums">${list.length}</span>
+        </div>
+        ${list.map(visitCard).join("")}
+      </div>`;
+    }).join("");
+  }
+
+  const chipRow = (group, map) => `
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${Object.entries(map).map(([k, m]) => `
+        <button type="button" data-${group}="${k}" onclick="calPickChip(this,'${group}')"
+          class="cal-chip"
+          style="font-size:12px;font-family:var(--font-sans);border-radius:20px;padding:6px 11px;cursor:pointer;
+                 background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);font-weight:500">
+          ${m.icon} ${m.label}</button>`).join("")}
+    </div>`;
 
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "cal-day-overlay";
+  ov.dataset.date = dateStr;
   ov.innerHTML = `
-    <div class="modal-box" style="max-width:360px;max-height:85vh;overflow-y:auto">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-        ${miniCalIcon(d, 30)}
-        <div class="modal-title" style="margin:0;font-size:16px;flex:1">${label}</div>
+    <div class="modal-box" style="max-width:380px;max-height:88vh;overflow-y:auto;padding:0">
+
+      <!-- Header band -->
+      <div style="position:relative;padding:16px 18px;
+                  background:linear-gradient(135deg,rgba(196,169,106,0.22),rgba(212,98,42,0.14));
+                  border-bottom:1px solid var(--gold-dim)">
         <button onclick="document.getElementById('cal-day-overlay').remove()"
-          style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer">✕</button>
+          style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.25);border:none;
+                 color:var(--text-warm);font-size:15px;cursor:pointer;width:26px;height:26px;border-radius:50%">✕</button>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="text-align:center;background:rgba(14,10,4,0.55);border:1px solid var(--gold-dim);
+                      border-radius:var(--radius-md);padding:6px 12px;flex-shrink:0">
+            <div style="font-size:10px;letter-spacing:1px;color:var(--gold)">${monthAb}</div>
+            <div style="font-size:24px;font-weight:700;color:var(--text-warm);line-height:1.1">${d.getDate()}</div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-family:var(--font-serif);font-size:18px;color:var(--gold)">${weekday}</div>
+            <div style="font-size:12px;color:var(--text-warm);margin-top:2px">
+              ${esc(rel)}${isWeekend ? " · weekend" : ""}
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px" title="${esc(moon.name)}">
+              ${moon.icon} ${esc(moon.name)}
+            </div>
+          </div>
+        </div>
+        ${planLine ? `<div style="margin-top:12px;font-size:12px;color:var(--text-warm);
+                      background:rgba(14,10,4,0.4);border-radius:20px;padding:5px 12px;display:inline-block">
+                      👥 ${esc(planLine)}</div>` : ""}
       </div>
 
-      ${visits.length === 0
-        ? `<div style="color:var(--text-dim);font-size:13px;font-style:italic;margin-bottom:16px">
-             Nobody logged a visit on this day yet.
-           </div>`
-        : visits.map(v => `
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
-                        border-bottom:1px solid rgba(196,169,106,0.08)">
-              <div class="avatar" style="background:${safeColor(v.visitorColor)};
-                   width:32px;height:32px;font-size:11px">
-                ${esc(v.visitorInitials||"?")}
-              </div>
-              <div style="flex:1">
-                <div style="font-size:14px;color:var(--text-warm);font-weight:600">${esc(v.visitorName||"Unknown")}</div>
-                ${v.notes ? `<div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word">${esc(v.notes)}</div>` : ""}
-              </div>
-            </div>`).join("")}
+      <div style="padding:16px 18px">
 
-      ${!userProfile?.isGuest ? `
-        <div style="margin-top:14px">
-          <div class="input-group" style="margin-bottom:10px">
-            <label>Notes (optional)</label>
-            <input type="text" id="cal-visit-notes" placeholder="What are you up to?" maxlength="120" />
-          </div>
-          <button class="btn btn-primary btn-full" onclick="saveCalendarVisit('${dateStr}')">
-            Log
-          </button>
-        </div>` : ""}
+        ${myVisits.length ? `<div style="font-size:12px;color:var(--gold);margin-bottom:10px">✓ You're on for this day</div>` : ""}
+
+        ${visits.length === 0
+          ? `<div style="text-align:center;padding:14px 0 18px;color:var(--text-muted)">
+               <div style="font-size:30px;margin-bottom:6px">🪵</div>
+               <div style="font-size:13px">Nobody's down for this day yet.</div>
+               ${!userProfile?.isGuest ? `<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Be the first — add yourself below.</div>` : ""}
+             </div>`
+          : `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+               ${isPast ? "Who was there" : "Who's coming"}
+             </div>${rosterHTML()}`}
+
+        <div id="cal-day-context" style="margin-top:6px"></div>
+
+        ${!userProfile?.isGuest ? `
+          <div style="margin-top:16px;border-top:1px solid var(--gold-dim);padding-top:14px">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+              ${myVisits.length ? "Log another" : "Add yourself to this day"}
+            </div>
+            <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">What for?</div>
+            ${chipRow("purpose", VISIT_PURPOSES)}
+            <div style="font-size:12px;color:var(--text-dim);margin:12px 0 6px">When?</div>
+            ${chipRow("daypart", DAY_PARTS)}
+            <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+              <span style="font-size:12px;color:var(--text-dim);flex:1">How many days at camp?</span>
+              <button type="button" onclick="calBumpSpan(-1)"
+                style="width:30px;height:30px;border-radius:8px;border:1px solid var(--card-border);
+                       background:rgba(255,255,255,0.05);color:var(--text-warm);font-size:16px;cursor:pointer">−</button>
+              <input type="number" id="cal-visit-span" value="1" min="1" max="${CAL_MAX_SPAN}" readonly
+                style="width:44px;text-align:center;padding:6px 0;font-size:14px" />
+              <button type="button" onclick="calBumpSpan(1)"
+                style="width:30px;height:30px;border-radius:8px;border:1px solid var(--card-border);
+                       background:rgba(255,255,255,0.05);color:var(--text-warm);font-size:16px;cursor:pointer">+</button>
+            </div>
+            <div id="cal-span-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px">Just this day</div>
+            <input type="text" id="cal-visit-notes" placeholder="Notes (optional) — stand, camp, plans…"
+              maxlength="140" style="width:100%;margin-top:12px" />
+            <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveCalendarVisit('${dateStr}')">
+              ${isPast ? "Log this day" : "I'm in for this day"}
+            </button>
+          </div>` : ""}
+      </div>
     </div>`;
   document.body.appendChild(ov);
+  fillCalDayContext(dateStr, d);
 };
+
+// "On this day" — harvests logged on this date, pulled from the trophy data layer
+async function fillCalDayContext(dateStr, dateObj) {
+  const slot = document.getElementById("cal-day-context");
+  if (!slot) return;
+  let harvests = [];
+  try {
+    const cache = await loadTrophyData(false);
+    harvests = (cache.harvests || []).filter(h => {
+      const hd = h.harvestDate?.toDate ? h.harvestDate.toDate() : new Date(h.harvestDate || 0);
+      return hd.getFullYear() === dateObj.getFullYear()
+          && hd.getMonth()    === dateObj.getMonth()
+          && hd.getDate()     === dateObj.getDate();
+    });
+  } catch (_) { return; }
+  if (!document.getElementById("cal-day-context")) return;
+  if (!harvests.length) { slot.innerHTML = ""; return; }
+  slot.innerHTML = `
+    <div style="margin-top:14px;background:var(--forest-card);border:1px solid var(--card-border);
+                border-radius:var(--radius-md);padding:12px">
+      <div style="font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+        🦌 On this day
+      </div>
+      ${harvests.map(h => {
+        const sp = speciesInfo(h.species);
+        const who = trophyCache?.members?.[h.uid]?.name || "A member";
+        const what = h.deerType === "buck" ? "buck" : h.deerType === "doe" ? "doe" : (sp.label || "harvest");
+        const detail = Number(h.rackScore) ? ` · ${h.rackScore}" B&C`
+                     : Number(h.weight)    ? ` · ${h.weight} lbs` : "";
+        return `<div style="font-size:12px;color:var(--text-warm);padding:3px 0">
+          ${sp.icon} ${esc(who)} — ${esc(what)}${detail}
+        </div>`;
+      }).join("")}
+    </div>`;
+}
 
 window.openAddCalendarVisit = function () {
   const today = new Date().toISOString().split("T")[0];
@@ -4836,7 +5152,10 @@ window.openAddCalendarVisit = function () {
 
 window.saveCalendarVisit = async function (dateStr) {
   if (!userProfile || userProfile.isGuest) return;
-  const notes = document.getElementById("cal-visit-notes")?.value.trim() || "";
+  const notes    = document.getElementById("cal-visit-notes")?.value.trim() || "";
+  const purpose  = document.querySelector('#cal-day-overlay button.cal-chip-on[data-purpose]')?.dataset.purpose || null;
+  const dayPart  = document.querySelector('#cal-day-overlay button.cal-chip-on[data-daypart]')?.dataset.daypart || null;
+  const spanDays = Math.min(CAL_MAX_SPAN, Math.max(1, Number(document.getElementById("cal-visit-span")?.value) || 1));
   try {
     await addDoc(collection(db, "visits"), {
       visitDate:        Timestamp.fromDate(new Date(dateStr + "T12:00:00")),
@@ -4845,10 +5164,18 @@ window.saveCalendarVisit = async function (dateStr) {
       visitorInitials:  userProfile.initials,
       visitorColor:     userProfile.color,
       notes,
+      purpose,
+      dayPart,
+      spanDays,
       createdAt:        serverTimestamp()
     });
     document.getElementById("cal-day-overlay")?.remove();
-    showToast("Visit logged!", "success");
+    showToast(
+      spanDays > 1
+        ? `You're on the calendar for ${spanDays} days.`
+        : purpose ? `${VISIT_PURPOSES[purpose].icon} You're on the calendar!` : "You're on the calendar!",
+      "success"
+    );
     // Refresh
     await loadCalendarMonth(calCurrentYear, calCurrentMonth);
     const el = document.getElementById("calendar-content");
@@ -4860,6 +5187,7 @@ window.saveCalendarVisit = async function (dateStr) {
 };
 
 window.deleteCalendarVisit = function (id) {
+  const reopenDate = document.getElementById("cal-day-overlay")?.dataset.date || null;
   appConfirm("Remove Visit", "Remove this visit from the calendar?", async () => {
     try {
       await deleteDoc(doc(db, "visits", id));
@@ -4867,6 +5195,8 @@ window.deleteCalendarVisit = function (id) {
       await loadCalendarMonth(calCurrentYear, calCurrentMonth);
       const el = document.getElementById("calendar-content");
       if (el) renderCalendarGrid(el);
+      const still = document.getElementById("cal-day-overlay");
+      if (still && reopenDate) { still.remove(); openCalendarDay(reopenDate); }
     } catch(err) { console.error(err); showToast("Could not remove.", "error"); }
   });
 };
@@ -5665,25 +5995,34 @@ function computeTrophyStats(cache) {
     .sort((a, b) => b.value - a.value);
   const firstYear = harvests.reduce((min, h) => Math.min(min, harvestYear(h)), new Date().getFullYear());
 
-  // contest placements (only crowned/closed seasons)
+  // contest placements — closed seasons give hard Won/Runner-up/3rd badges;
+  // open seasons give a soft "Leading" badge to whoever's on top with a score.
   const placements = {};
-  const byContest = {};
-  contestEntries.forEach(e => {
-    const key = (e.contest || "") + "_" + (e.year || "");
-    (byContest[key] = byContest[key] || []).push(e);
-  });
-  Object.entries(byContest).forEach(([key, entries]) => {
-    if (!contestMeta[key]?.closed) return;
-    const [contest, year] = key.split("_");
+  const standings = computeContestStandings(cache);
+  Object.entries(standings).forEach(([key, list]) => {
+    const us = key.lastIndexOf("_");
+    const contest = key.slice(0, us);
+    const year = Number(key.slice(us + 1));
     const c = CONTESTS[contest];
-    [...entries].sort((a, b) => (Number(b.measure) || 0) - (Number(a.measure) || 0)).forEach((e, i) => {
-      if (i > 2 || !e.uid) return;
-      (placements[e.uid] = placements[e.uid] || []).push({
-        contest, year: Number(year), place: i + 1,
-        measure: (Number(e.measure) || 0) + (c?.unit || ""),
-        label: c?.label || contest
+    if (!c) return;
+    const scored = list.filter(s => s.score != null);
+    if (!scored.length) return;
+    if (contestMeta[key]?.closed) {
+      scored.slice(0, 3).forEach((s, i) => {
+        (placements[s.uid] = placements[s.uid] || []).push({
+          contest, year, place: i + 1,
+          measure: contestValueStr(contest, s.score),
+          label: c.label || contest
+        });
       });
-    });
+    } else {
+      const lead = scored[0];
+      (placements[lead.uid] = placements[lead.uid] || []).push({
+        contest, year, place: 1, open: true,
+        measure: contestValueStr(contest, lead.score),
+        label: c.label || contest
+      });
+    }
   });
 
   return { per, rankings, yearBuckLeader, yearHarvestLeader, allBucks, firstYear, placements };
@@ -5716,6 +6055,21 @@ function trophyYearBars(byYearObj) {
       </div>`;
     }).join("")}
   </div>`;
+}
+
+// One contest placement → a trophy-room badge {icon,text,strong}
+function contestPlacementBadge(p) {
+  if (p.open) return {
+    icon: "🔥",
+    text: `Leading the ${p.year} ${p.label} (${p.measure})`,
+    strong: false
+  };
+  return {
+    icon: p.place === 1 ? "🏆" : p.place === 2 ? "🥈" : "🥉",
+    text: (p.place === 1 ? "Won " : p.place === 2 ? "Runner-up, " : "3rd, ") + p.label + " " + p.year
+          + (p.place === 1 ? "" : " (" + p.measure + ")"),
+    strong: p.place === 1
+  };
 }
 
 function trophyBadges(list) {
@@ -5849,14 +6203,8 @@ window.renderTrophyRoom = async function () {
     // Buck size / best rack
     const rRank = rankOf(stats.rankings.bestRack);
     const rackBadges = [];
-    (stats.placements[uid] || []).filter(p => p.contest === "buck" || p.contest === "bowbuck").forEach(p => {
-      rackBadges.push({
-        icon: p.place === 1 ? "🏆" : p.place === 2 ? "🥈" : "🥉",
-        text: (p.place === 1 ? "Won " : p.place === 2 ? "Runner-up, " : "3rd, ") + p.label + " " + p.year
-              + (p.place === 1 ? "" : " (" + p.measure + ")"),
-        strong: p.place === 1
-      });
-    });
+    (stats.placements[uid] || []).filter(p => p.contest === "buck" || p.contest === "bowbuck")
+      .forEach(p => rackBadges.push(contestPlacementBadge(p)));
     Object.entries(stats.yearBuckLeader)
       .filter(([, lead]) => lead.uid === uid)
       .sort((a, b) => b[0] - a[0]).slice(0, 3)
@@ -5895,12 +6243,7 @@ window.renderTrophyRoom = async function () {
     // Turkey badges (spring + fall contest placements)
     const turkeyBadges = (stats.placements[uid] || [])
       .filter(p => p.contest === "springturkey" || p.contest === "fallturkey")
-      .map(p => ({
-        icon: p.place === 1 ? "🏆" : p.place === 2 ? "🥈" : "🥉",
-        text: (p.place === 1 ? "Won " : p.place === 2 ? "Runner-up, " : "3rd, ") + p.label + " " + p.year
-              + (p.place === 1 ? "" : " (" + p.measure + ")"),
-        strong: p.place === 1
-      }));
+      .map(contestPlacementBadge);
 
     // Longest beard — surface if there's beard data anywhere, or the member
     // has a turkey contest placement (a weight-only hen won't have beard data)
@@ -6095,15 +6438,15 @@ window.renderMasterTrophyRoom = async function () {
     ].filter(([, list]) => list.length);
 
     const contestRows = [];
+    const allStandings = computeContestStandings(cache);
     Object.entries(cache.contestMeta).forEach(([key, meta]) => {
       if (!meta.closed) return;
       const us = key.lastIndexOf("_");
       const contest = key.slice(0, us), year = key.slice(us + 1);
       const c = CONTESTS[contest];
-      const entries = cache.contestEntries
-        .filter(e => e.contest === contest && String(e.year) === year)
-        .map(e => ({ uid: e.uid, value: Number(e.measure) || 0 }))
-        .sort((a, b) => b.value - a.value);
+      const entries = (allStandings[key] || [])
+        .filter(s => s.score != null)
+        .map(s => ({ uid: s.uid, value: s.score }));
       if (entries.length) contestRows.push(row(`${c?.label || contest} · ${year}`, entries, "", v => contestValueStr(contest, v)));
     });
 
