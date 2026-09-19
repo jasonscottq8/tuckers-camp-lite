@@ -164,7 +164,7 @@ gauge for a plain red dot on any day with activity, gold ring on days you're on
 Quick Access became "Quick Actions": long rectangular blaze-orange buttons
 (`.action-btn`, same gradient as the existing back-button) that jump straight
 into the action — Log Harvest → `openAddHarvest()`, Message Camp →
-`openFeedCompose()`, Trail Cam, Trophy Room — not just navigation. Month nav
+`goFeed()`, Trail Cam, Trophy Room — not just navigation. Month nav
 and add/delete-visit now refresh whichever calendar surface(s) are on screen
 via a shared `refreshAllCalendarViews()`. `cabinpicture.jpg` is unreferenced
 now (left in `Images/`, dropped from the SW precache list).
@@ -195,6 +195,53 @@ only) — every path converges on an optional photo step then notes + date +
 "Log It". Reuses the generic `wizardDots`/`wizardQuestion` helpers built for
 the calendar wizard. Fixed a bug found during testing: the "Something else"
 branch never set `hvWizard.path`, so its progress dots silently never rendered.
+
+### Inline compose + real notification bell — SHIPPED in lite-2.18.0
+
+Three follow-ups from the user's first real look at the redesigned Home/Feed:
+
+1. **Message Camp popup gone.** The "New Post" modal overlay is gone — the
+   Feed screen's existing "What's on your mind?" bar now expands in place
+   (`expandFeedComposer()`/`collapseFeedComposer()` swap the same
+   `#feed-compose-wrap` div between a collapsed one-liner and the full
+   textarea + photo + Post/Cancel) instead of spawning `.modal-overlay`. The
+   Home screen's Message Camp button now just calls `goFeed()` — it no longer
+   auto-opens the composer the instant you land on the screen.
+2. **The bell is a real notification list now**, not "Coming soon." It merges
+   two live queries — `feed` docs where `isAuto == true` (harvest, trail cam,
+   rank-up, contest-winner) and all `visits` (calendar day entries) — sorted
+   newest-first, rendered read-only (no edit/delete — `notifCard()`), 20 at a
+   time with a "Show More" button (`notifShown`/`window.notifShowMore`). The
+   public Feed itself now queries `isAuto == false` only, so it's messages-only;
+   `feedPostCard`'s old blue "auto-notification" branch (with its delete
+   button) was deleted since it's now unreachable from the Feed. Harvest/trail
+   cam/rank-up/contest auto-posts still get written into the same `feed`
+   collection via the unchanged `postAutoFeedEvent` — only the *display* split,
+   no schema/collection change, no rules change needed.
+3. **Unread indicator, not push spam.** `startNotifListeners()` (called once
+   from `enterApp()`, torn down on sign-out) keeps a running unread count —
+   `#bell-badge` in the header shows a number, and `navigator.setAppBadge()`
+   puts a dot on the home-screen icon itself on supported/installed PWAs
+   (`navigator.clearAppBadge()` when caught up). "Last seen" is a plain
+   `localStorage` timestamp bumped on opening the bell — no new Firestore
+   field, no cross-device sync, matches the "un-editable, low-key" ask.
+4. **Auto-update on every return to the app**, not just at sign-in. Existing
+   lite-2.15.1 auto-update only fired from `onAuthStateChanged`, which doesn't
+   refire if the browser kept the PWA alive in the background — reopening from
+   the home-screen icon could sit on a stale version indefinitely. Added a
+   `visibilitychange` listener: becoming visible again opens a 15s auto-update
+   grace window (same "safe to refresh silently" logic already used at the
+   login door) and calls `maybeAutoUpdate()`.
+
+Verified in-browser via temporary `window.__debugSetUser`/`__debugEnterApp`/
+`__debugNotif` hooks (removed after): inline composer expands/collapses with
+no `.modal-overlay` anywhere in the DOM; bell renders empty-state, then
+harvest/trailcam/tier/contest/calendar cards with correct icons, text, and
+"View X" links off injected fixture data; 25 fake items → 20 shown + Show More
+→ all 25; badge shows/hides correctly around `openNotifications()`;
+`visibilitychange` dispatch doesn't throw. Real Firestore reads/writes and the
+actual app-icon badge (needs an installed PWA) are unverified — no auth in the
+sandbox.
 
 ### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 

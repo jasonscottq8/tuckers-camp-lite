@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.17.0";
+const APP_VERSION = "lite-2.18.0";
 
 
 
@@ -201,6 +201,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       currentUser = null;
       userProfile = null;
+      stopNotifListeners();
       showLoginScreen();
       openAutoUpdateWindow(0);      // at the door — safe to refresh silently
       maybeAutoUpdate();
@@ -209,6 +210,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Flush any calls that were queued before module finished loading
   if (typeof window._moduleReady === 'function') window._moduleReady();
+});
+
+// Re-opening the app (tapping its icon, switching back from another app or
+// tab) doesn't reload the page or refire onAuthStateChanged if the browser
+// kept it alive in the background — so without this, a member could go days
+// without ever landing back on a moment where an update gets applied. Treat
+// every return-to-foreground as another safe "door" moment.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    openAutoUpdateWindow(15000);
+    maybeAutoUpdate();
+  }
 });
 
 // ============================================================
@@ -610,6 +623,9 @@ function enterApp() {
 
   // Init kill counter
   updateKillCounter();
+
+  // Bell badge / app-icon dot — live for the whole session, not just the bell screen
+  startNotifListeners();
 }
 
 // ============================================================
@@ -705,20 +721,152 @@ window.fabAction = function () {
 
 // Stubs — filled in as steps complete
 // openAddTrailCam defined in Trail Cam module below
-function openAddPost()     { openFeedCompose(); }
+function openAddPost()     { expandFeedComposer(); document.getElementById("feed-compose-wrap")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
 function openAddVisit()    { openAddCalendarVisit(); }
 
 // ============================================================
-// NOTIFICATIONS
+// NOTIFICATIONS (bell) — harvest, trail cam, rank-up, and contest
+// auto-events plus calendar day entries, merged and read-only.
+// The message feed itself only shows actual member posts now.
 // ============================================================
+const NOTIF_SEEN_KEY = "tuckersNotifLastSeen";
+let notifUnsubFeed   = null;
+let notifUnsubVisits = null;
+let notifFeedItems   = [];
+let notifVisitItems  = [];
+let notifShown       = 20;
+
+function notifLastSeenMs() { return Number(localStorage.getItem(NOTIF_SEEN_KEY) || 0); }
+
+function notifTimeMs(item) {
+  const ts = item.createdAt;
+  if (!ts) return 0;
+  return ts.toMillis ? ts.toMillis() : 0;
+}
+
+function notifMergedSorted() {
+  return [...notifFeedItems, ...notifVisitItems].sort((a, b) => notifTimeMs(b) - notifTimeMs(a));
+}
+
+function refreshNotifBadge() {
+  const unread = notifMergedSorted().filter(i => notifTimeMs(i) > notifLastSeenMs()).length;
+  const badge  = document.getElementById("bell-badge");
+  if (badge) {
+    badge.textContent   = unread > 99 ? "99+" : String(unread);
+    badge.style.display = unread > 0 ? "flex" : "none";
+  }
+  if ("setAppBadge" in navigator) {
+    try { unread > 0 ? navigator.setAppBadge(unread) : navigator.clearAppBadge(); } catch (_) {}
+  }
+}
+
+// Started once on entering the app (not per-visit to the bell screen) so the
+// badge/app-icon dot stay live no matter which screen the member is on.
+function startNotifListeners() {
+  if (notifUnsubFeed) return;
+
+  const fq = query(collection(db, "feed"), where("isAuto", "==", true), orderBy("createdAt", "desc"), limit(150));
+  notifUnsubFeed = onSnapshot(fq, (snap) => {
+    notifFeedItems = snap.docs.map(d => ({ kind: "auto", id: d.id, ...d.data() }));
+    if (currentScreen === "screen-notifications") { notifLastSeenTouch(); renderNotifList(); }
+    refreshNotifBadge();
+  }, err => console.error("Notif feed listener:", err));
+
+  const vq = query(collection(db, "visits"), orderBy("createdAt", "desc"), limit(150));
+  notifUnsubVisits = onSnapshot(vq, (snap) => {
+    notifVisitItems = snap.docs.map(d => ({ kind: "visit", id: d.id, ...d.data() }));
+    if (currentScreen === "screen-notifications") { notifLastSeenTouch(); renderNotifList(); }
+    refreshNotifBadge();
+  }, err => console.error("Notif visits listener:", err));
+}
+
+function stopNotifListeners() {
+  if (notifUnsubFeed)   { notifUnsubFeed();   notifUnsubFeed   = null; }
+  if (notifUnsubVisits) { notifUnsubVisits(); notifUnsubVisits = null; }
+  notifFeedItems = []; notifVisitItems = [];
+  const badge = document.getElementById("bell-badge");
+  if (badge) badge.style.display = "none";
+  if ("setAppBadge" in navigator) { try { navigator.clearAppBadge(); } catch (_) {} }
+}
+
+// Bump "last seen" while the bell screen is actually open, so a new event
+// arriving while the member is looking at the list doesn't count as unread.
+function notifLastSeenTouch() { localStorage.setItem(NOTIF_SEEN_KEY, String(Date.now())); }
+
+const NOTIF_LINK_BTN_STYLE = "background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:var(--radius-sm);padding:5px 12px;font-size:11px;cursor:pointer;margin-top:8px";
+
+function notifCard(item) {
+  const dateStr = formatDate(item.createdAt);
+  let icon = "🏕️", body = "New activity at Tucker's Camp", linkBtn = "";
+
+  if (item.kind === "visit") {
+    const p    = visitPurpose(item), dp = visitDayPart(item);
+    icon       = (p && p.icon) || "📅";
+    const bits = [];
+    if (p) bits.push(p.label);
+    if (dp && item.dayPart !== "allday") bits.push(dp.label);
+    body    = `📅 <strong>${esc(item.visitorName || "A member")}</strong> is on the calendar for ${esc(visitRangeLabel(item))}${bits.length ? " — " + esc(bits.join(", ")) : ""}`;
+    linkBtn = `<button class="btn btn-sm" onclick="goCalendar()" style="${NOTIF_LINK_BTN_STYLE}">View Calendar</button>`;
+  } else {
+    const tmpl = AUTO_FEED_TYPES[item.type];
+    body = tmpl ? tmpl(item.data || {}) : "New activity at Tucker's Camp";
+    if (item.type === "harvest")  linkBtn = `<button class="btn btn-sm" onclick="goHarvest()" style="${NOTIF_LINK_BTN_STYLE}">View Harvest Log</button>`;
+    if (item.type === "trailcam") linkBtn = `<button class="btn btn-sm" onclick="goTrailCam()" style="${NOTIF_LINK_BTN_STYLE}">View Trail Cam</button>`;
+    if (item.type === "tier")     linkBtn = `<button class="btn btn-sm" onclick="goTo('screen-mykills')" style="${NOTIF_LINK_BTN_STYLE}">View Trophy Room</button>`;
+    if (item.type === "contest")  linkBtn = `<button class="btn btn-sm" onclick="goTo('screen-contests')" style="${NOTIF_LINK_BTN_STYLE}">View Contests</button>`;
+  }
+
+  return `
+    <div style="background:rgba(30,80,160,0.25);border:1px solid rgba(80,140,255,0.35);
+                border-radius:var(--radius-lg);padding:10px 14px;margin-bottom:10px;
+                backdrop-filter:blur(4px)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:28px;height:28px;border-radius:50%;background:rgba(80,140,255,0.2);
+                    border:1px solid rgba(80,140,255,0.4);display:flex;align-items:center;
+                    justify-content:center;font-size:14px;flex-shrink:0">${icon}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;color:#a0c4ff;line-height:1.4">${body}</div>
+          <div style="font-size:10px;color:rgba(160,196,255,0.6);margin-top:2px">${dateStr}</div>
+        </div>
+      </div>
+      ${linkBtn}
+    </div>`;
+}
+
+function renderNotifList() {
+  const el = document.getElementById("notifications-content");
+  if (!el) return;
+  const merged = notifMergedSorted();
+
+  if (!merged.length) {
+    el.innerHTML = `
+      <div style="padding:32px 16px;text-align:center;color:var(--text-muted)">
+        <div style="font-size:36px;margin-bottom:12px">🔔</div>
+        <div>Nothing to show yet.</div>
+        <div style="font-size:12px;margin-top:6px">Harvests, trail cam uploads, and calendar plans will show up here.</div>
+      </div>`;
+    return;
+  }
+
+  const slice = merged.slice(0, notifShown);
+  el.innerHTML = `
+    <div style="padding:12px 16px 80px">
+      ${slice.map(notifCard).join("")}
+      ${merged.length > notifShown ? `
+        <div style="text-align:center;padding:16px">
+          <button class="btn btn-secondary btn-sm" onclick="notifShowMore()">Show More</button>
+        </div>` : ""}
+    </div>`;
+}
+
+window.notifShowMore = function () { notifShown += 20; renderNotifList(); };
+
 window.openNotifications = function () {
   showScreen("screen-notifications");
-  document.getElementById("notifications-content").innerHTML = `
-    <div style="padding:32px 16px;text-align:center;color:var(--text-muted)">
-      <div style="font-size:36px;margin-bottom:12px">🔔</div>
-      <div>Coming soon — stay tuned.</div>
-    </div>
-  `;
+  notifShown = 20;
+  renderNotifList();
+  notifLastSeenTouch();
+  refreshNotifBadge();
 };
 
 // ============================================================
@@ -740,7 +888,7 @@ function renderHomeScreen() {
     </div>
     <div class="action-stack">
       ${actionBtn("🦌", "Log Harvest",   "goHarvest();openAddHarvest()")}
-      ${actionBtn("💬", "Message Camp",  "goFeed();openFeedCompose()")}
+      ${actionBtn("💬", "Message Camp",  "goFeed()")}
       ${actionBtn("📷", "Trail Cam",     "goTrailCam()")}
       ${actionBtn("🏆", "Trophy Room",   "goTo('screen-mykills')")}
     </div>
@@ -1407,6 +1555,12 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.18.0", date: "Sep 2026", notes: [
+      "Message Camp no longer opens a popup window — tap \"What's on your mind?\" and it opens right there in the Feed",
+      "The bell now shows a real notification list — harvest logs, trail cam uploads, rank-ups, contest results, and calendar plans, in one place",
+      "New activity now shows as a small number on the bell — and as a dot on the app icon if you've added Tucker's Camp to your home screen",
+      "The app now checks for updates every time you come back to it, not just when you sign in"
+    ]},
     { version: "lite-2.17.0", date: "Sep 2026", notes: [
       "Log Harvest is now one question at a time instead of one long form — pick Deer, Turkey, or Something Else and the app only asks what's relevant"
     ]},
@@ -6028,25 +6182,8 @@ window.goFeed = function () {
 window.renderFeedScreen = function () {
   const content = document.getElementById("feed-content");
   content.innerHTML = `
-    <!-- Compose bar -->
-    ${userProfile ? `
-      <div style="padding:12px 16px;border-bottom:1px solid var(--gold-dim)">
-        <div style="display:flex;gap:10px;align-items:center">
-          <div class="avatar" style="background:${safeColor(userProfile.color)};
-               width:36px;height:36px;font-size:13px;flex-shrink:0">
-            ${esc(userProfile.initials)}
-          </div>
-          <button onclick="openFeedCompose()"
-            style="flex:1;background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
-                   border-radius:var(--radius-xl);padding:10px 16px;color:var(--text-muted);
-                   font-size:14px;cursor:pointer;text-align:left;font-family:var(--font-sans);
-                   transition:border-color 0.2s"
-            onmouseover="this.style.borderColor='var(--gold-dim)'"
-            onmouseout="this.style.borderColor='var(--card-border)'">
-            What's on your mind?
-          </button>
-        </div>
-      </div>` : ""}
+    <!-- Compose bar (inline, expands in place — no popup) -->
+    <div id="feed-compose-wrap">${userProfile ? feedComposerCollapsedHTML() : ""}</div>
     <div id="feed-list" style="padding:12px 16px 80px">
       <div style="text-align:center;padding:40px;color:var(--text-muted)">
         <div class="spinner" style="margin:0 auto 12px"></div>
@@ -6055,6 +6192,65 @@ window.renderFeedScreen = function () {
     </div>
   `;
   loadFeed();
+};
+
+function feedComposerCollapsedHTML() {
+  return `
+    <div style="padding:12px 16px;border-bottom:1px solid var(--gold-dim)">
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="avatar" style="background:${safeColor(userProfile.color)};
+             width:36px;height:36px;font-size:13px;flex-shrink:0">
+          ${esc(userProfile.initials)}
+        </div>
+        <button onclick="expandFeedComposer()"
+          style="flex:1;background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
+                 border-radius:var(--radius-xl);padding:10px 16px;color:var(--text-muted);
+                 font-size:14px;cursor:pointer;text-align:left;font-family:var(--font-sans);
+                 transition:border-color 0.2s"
+          onmouseover="this.style.borderColor='var(--gold-dim)'"
+          onmouseout="this.style.borderColor='var(--card-border)'">
+          What's on your mind?
+        </button>
+      </div>
+    </div>`;
+}
+
+function feedComposerExpandedHTML() {
+  return `
+    <div style="padding:12px 16px;border-bottom:1px solid var(--gold-dim)">
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+        <div class="avatar" style="background:${safeColor(userProfile.color)};
+             width:36px;height:36px;font-size:13px;flex-shrink:0">${esc(userProfile.initials)}</div>
+        <textarea id="feed-compose-text" placeholder="What's on your mind?"
+          style="flex:1;min-height:80px;resize:none"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <button class="btn btn-secondary btn-sm" type="button"
+          onclick="document.getElementById('feed-photo-input').click()">
+          📷 Add Photo
+        </button>
+        <span id="feed-photo-name" style="font-size:12px;color:var(--text-muted)">Optional</span>
+        <input type="file" id="feed-photo-input" accept="image/*" style="display:none"
+          onchange="document.getElementById('feed-photo-name').textContent=this.files[0]?.name||'Optional'" />
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary btn-sm" onclick="collapseFeedComposer()">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="feed-post-btn" onclick="submitFeedPost()">Post</button>
+      </div>
+    </div>`;
+}
+
+window.expandFeedComposer = function () {
+  if (!userProfile) { showToast("Sign in to post.", "error"); return; }
+  const wrap = document.getElementById("feed-compose-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = feedComposerExpandedHTML();
+  setTimeout(() => document.getElementById("feed-compose-text")?.focus(), 50);
+};
+
+window.collapseFeedComposer = function () {
+  const wrap = document.getElementById("feed-compose-wrap");
+  if (wrap) wrap.innerHTML = userProfile ? feedComposerCollapsedHTML() : "";
 };
 
 let feedPageSize = 20;
@@ -6070,7 +6266,7 @@ function loadFeed() {
   const list = document.getElementById("feed-list");
   if (!list) return;
 
-  const q = query(collection(db, "feed"), orderBy("createdAt", "desc"), limit(feedPageSize));
+  const q = query(collection(db, "feed"), where("isAuto", "==", false), orderBy("createdAt", "desc"), limit(feedPageSize));
 
   feedUnsub = onSnapshot(q, (snap) => {
     feedLastDoc = snap.docs[snap.docs.length - 1] || null;
@@ -6117,7 +6313,7 @@ window.loadMoreFeed = async function () {
   if (!feedLastDoc || feedAllLoaded) return;
   try {
     const { getDocs: gd, startAfter } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-    const q    = query(collection(db, "feed"), orderBy("createdAt","desc"), startAfter(feedLastDoc), limit(feedPageSize));
+    const q    = query(collection(db, "feed"), where("isAuto","==",false), orderBy("createdAt","desc"), startAfter(feedLastDoc), limit(feedPageSize));
     const snap = await getDocs(q);
     feedLastDoc   = snap.docs[snap.docs.length - 1] || feedLastDoc;
     feedAllLoaded = snap.docs.length < feedPageSize;
@@ -6137,42 +6333,12 @@ window.loadMoreFeed = async function () {
 };
 
 function feedPostCard(post) {
-  const isAuto    = post.isAuto;
-  const data      = post.data || {};
   const reactions = post.reactions || {};
   const comments  = post.comments  || [];
   const dateStr   = formatDate(post.createdAt);
-  const isOwner   = userProfile && (userProfile.uid === (post.uid || data.uid) || userProfile.role === "admin");
+  const isOwner   = userProfile && (userProfile.uid === post.uid || userProfile.role === "admin");
 
-  // Auto-notification posts — blue, thin, no comments
-  if (isAuto) {
-    const tmpl = AUTO_FEED_TYPES[post.type];
-    const body = tmpl ? tmpl(data) : "New activity at Tucker's Camp";
-    let linkBtn = "";
-    if (post.type === "harvest")  linkBtn = `<button class="btn btn-sm" onclick="goHarvest()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:var(--radius-sm);padding:5px 12px;font-size:11px;cursor:pointer;margin-top:8px">View Harvest Log</button>`;
-    if (post.type === "trailcam") linkBtn = `<button class="btn btn-sm" onclick="goTrailCam()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:var(--radius-sm);padding:5px 12px;font-size:11px;cursor:pointer;margin-top:8px">View Trail Cam</button>`;
-    if (post.type === "tier")     linkBtn = "";
-
-    return `
-      <div style="background:rgba(30,80,160,0.25);border:1px solid rgba(80,140,255,0.35);
-                  border-radius:var(--radius-lg);padding:10px 14px;margin-bottom:10px;
-                  backdrop-filter:blur(4px)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:28px;height:28px;border-radius:50%;background:rgba(80,140,255,0.2);
-                      border:1px solid rgba(80,140,255,0.4);display:flex;align-items:center;
-                      justify-content:center;font-size:14px;flex-shrink:0">🏕️</div>
-          <div style="flex:1">
-            <div style="font-size:13px;color:#a0c4ff;line-height:1.4">${body}</div>
-            <div style="font-size:10px;color:rgba(160,196,255,0.6);margin-top:2px">${dateStr}</div>
-          </div>
-          ${isOwner ? `<button onclick="deleteFeedPost('${post.id}')"
-            style="background:none;border:none;color:rgba(160,196,255,0.4);font-size:14px;cursor:pointer">🗑</button>` : ""}
-        </div>
-        ${linkBtn}
-      </div>`;
-  }
-
-  // Regular user posts
+  // Regular user posts (auto-notification posts live in the bell now, not the feed)
   // Get tier info for flair
   const posterPts  = post.killPoints || 0;
   const posterTier = getTierForPoints(posterPts);
@@ -6323,40 +6489,6 @@ window.deleteFeedPost = function (id) {
 };
 
 // ── Compose ───────────────────────────────────────────────────
-window.openFeedCompose = function () {
-  if (!userProfile) { showToast("Sign in to post.", "error"); return; }
-  const ov = document.createElement("div");
-  ov.className = "modal-overlay"; ov.id = "feed-compose-overlay";
-  ov.innerHTML = `
-    <div class="modal-box" style="max-width:380px">
-      <div class="modal-title">New Post</div>
-      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px">
-        <div class="avatar" style="background:${safeColor(userProfile.color)};
-             width:36px;height:36px;font-size:13px;flex-shrink:0">${esc(userProfile.initials)}</div>
-        <textarea id="feed-compose-text" placeholder="What's on your mind?"
-          style="flex:1;min-height:100px;resize:none"></textarea>
-      </div>
-      <div class="input-group" style="margin-bottom:16px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <button class="btn btn-secondary btn-sm" type="button"
-            onclick="document.getElementById('feed-photo-input').click()">
-            📷 Add Photo
-          </button>
-          <span id="feed-photo-name" style="font-size:12px;color:var(--text-muted)">Optional</span>
-        </div>
-        <input type="file" id="feed-photo-input" accept="image/*" style="display:none"
-          onchange="document.getElementById('feed-photo-name').textContent=this.files[0]?.name||'Optional'" />
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('feed-compose-overlay').remove()">Cancel</button>
-        <button class="btn btn-primary btn-sm" id="feed-post-btn" onclick="submitFeedPost()">Post</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(ov);
-  setTimeout(() => document.getElementById("feed-compose-text")?.focus(), 100);
-};
-
 window.submitFeedPost = async function () {
   const text  = document.getElementById("feed-compose-text")?.value.trim();
   const file  = document.getElementById("feed-photo-input")?.files?.[0] || null;
@@ -6390,7 +6522,7 @@ window.submitFeedPost = async function () {
       comments:    []
     });
 
-    document.getElementById("feed-compose-overlay")?.remove();
+    collapseFeedComposer();
     showToast("Posted! 💬", "success");
   } catch(err) {
     console.error(err);
