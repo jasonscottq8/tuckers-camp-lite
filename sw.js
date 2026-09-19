@@ -1,5 +1,5 @@
 // sw.js — Tucker's Camp Lite
-const APP_VERSION = "lite-2.14.4";
+const APP_VERSION = "lite-2.16.0";
 const CACHE_NAME  = `tuckers-camp-lite-${APP_VERSION}`;
 
 const STATIC_ASSETS = [
@@ -8,8 +8,8 @@ const STATIC_ASSETS = [
   "/style.css",
   "/app.js",
   "/firebase.js",
+  "/manifest.json",
   "/Images/wood-back.jpg",
-  "/Images/cabinpicture.jpg",
   "/Images/appiconlogo.png",
   "/Images/tuckers-icon-192.png",
   "/Images/tuckers-icon-512.png",
@@ -17,17 +17,29 @@ const STATIC_ASSETS = [
   "/Images/tuckers-icon-maskable-512.png"
 ];
 
-// Install — skip waiting IMMEDIATELY
+// The Firebase SDK — version-pinned and immutable, and served with CORS, so we
+// can cache it and boot the app offline. Each file only imports firebase-app.js.
+const FIREBASE_SDK = "https://www.gstatic.com/firebasejs/10.12.0/";
+const CDN_ASSETS = [
+  FIREBASE_SDK + "firebase-app.js",
+  FIREBASE_SDK + "firebase-auth.js",
+  FIREBASE_SDK + "firebase-firestore.js",
+  FIREBASE_SDK + "firebase-storage.js"
+];
+
+// Install — cache the shell + SDK, activate immediately
 self.addEventListener("install", (e) => {
   self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>
-      Promise.allSettled(STATIC_ASSETS.map(url => cache.add(url).catch(() => null)))
+      Promise.allSettled(
+        [...STATIC_ASSETS, ...CDN_ASSETS].map(url => cache.add(url).catch(() => null))
+      )
     )
   );
 });
 
-// Activate — claim all clients immediately, delete old caches
+// Activate — claim clients, drop old caches
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     Promise.all([
@@ -39,26 +51,51 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// Fetch — network first, cache fallback, skip external URLs
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
-  if (url.hostname !== self.location.hostname) return;
+  const isSameOrigin  = url.hostname === self.location.hostname;
+  const isFirebaseSDK = e.request.url.startsWith(FIREBASE_SDK);
 
+  if (!isSameOrigin && !isFirebaseSDK) return;   // let everything else pass through
+
+  // Firebase SDK: cache-first (it never changes for a given version)
+  if (isFirebaseSDK) {
+    e.respondWith(
+      caches.match(e.request).then((hit) =>
+        hit || fetch(e.request).then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
+          }
+          return res;
+        })
+      )
+    );
+    return;
+  }
+
+  // Same-origin: network-first, fall back to cache; navigations fall back to the shell
   e.respondWith(
     fetch(e.request)
       .then((res) => {
         if (res.ok) {
           const clone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
         }
         return res;
       })
-      .catch(() => caches.match(e.request))
+      .catch(async () => {
+        const cached = await caches.match(e.request);
+        if (cached) return cached;
+        if (e.request.mode === "navigate") {
+          return (await caches.match("/index.html")) || (await caches.match("/"));
+        }
+        return Response.error();
+      })
   );
 });
 
-// Messages
 self.addEventListener("message", (e) => {
   if (e.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (e.data?.type === "GET_VERSION")  e.ports[0]?.postMessage({ version: APP_VERSION });

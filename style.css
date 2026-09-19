@@ -319,7 +319,7 @@ body::after {
   text-align: center;
 }
 
-.login-tabs {
+.login-seg {
   display: flex;
   width: 100%;
   max-width: 320px;
@@ -330,7 +330,7 @@ body::after {
   margin-bottom: 20px;
 }
 
-.login-tab {
+.login-seg-btn {
   flex: 1;
   padding: 9px;
   background: none;
@@ -342,9 +342,10 @@ body::after {
   cursor: pointer;
   transition: all var(--transition);
   letter-spacing: 0.3px;
+  font-family: var(--font-sans);
 }
 
-.login-tab.active {
+.login-seg-btn.active {
   background: linear-gradient(135deg, var(--orange), var(--orange-bright));
   color: #fff;
   box-shadow: 0 2px 8px rgba(212,98,42,0.4);
@@ -358,6 +359,32 @@ body::after {
   gap: 12px;
 }
 .login-form.hidden { display: none; }
+
+.login-link {
+  background: none;
+  border: none;
+  color: var(--gold);
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  padding: 6px;
+  align-self: center;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.login-link:hover { color: var(--gold-bright); }
+
+.login-note {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.login-note.hidden { display: none; }
+#signup-fields.hidden { display: none; }
 
 /* ============================================================
    INPUTS
@@ -565,122 +592,145 @@ textarea { resize: none; min-height: 80px; }
 .back-btn:active { transform: scale(0.97); }
 
 /* ============================================================
-   FEATURE GRID BUTTONS
+   QUICK-ACTION BUTTONS — long rectangular, blaze orange
    ============================================================ */
-.feature-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 0 16px;
 }
 
-.feature-btn {
+.action-btn {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 20px 12px;
-  min-height: 104px;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 16px;
   box-sizing: border-box;
-  background: var(--forest-card);
-  border: 1px solid var(--card-border);
+  background: linear-gradient(135deg, var(--orange), var(--orange-bright));
+  border: none;
   border-radius: var(--radius-lg);
-  color: var(--text-warm);
-  font-size: 13px;
-  font-weight: 600;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
   font-family: var(--font-sans);
-  cursor: pointer;
-  transition: all 0.22s ease;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(196,169,106,0.06);
-  position: relative;
-  overflow: hidden;
-}
-
-.feature-btn::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(196,169,106,0.06) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 0.22s ease;
-}
-
-.feature-btn:hover {
-  border-color: var(--gold-dim);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(196,169,106,0.15);
-  transform: translateY(-2px);
-}
-.feature-btn:hover::before { opacity: 1; }
-.feature-btn:active { transform: translateY(0) scale(0.98); }
-
-.feature-btn .feat-icon {
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-}
-
-.feature-btn .feat-label {
-  color: var(--text-warm);
   letter-spacing: 0.2px;
-  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(212,98,42,0.35), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+.action-btn:hover { filter: brightness(1.08); box-shadow: 0 6px 22px rgba(212,98,42,0.5); transform: translateY(-1px); }
+.action-btn:active { transform: translateY(0) scale(0.99); filter: brightness(0.97); }
+
+.action-btn .action-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.3));
+}
+
+.action-btn .action-label { flex: 1; text-align: left; }
+
+.action-btn .action-chevron {
+  font-size: 20px;
+  color: rgba(255,255,255,0.7);
+  flex-shrink: 0;
 }
 
 /* ============================================================
-   HERO
+   HOME CALENDAR CARD — the front page, in place of a photo
    ============================================================ */
-.hero-wrap {
-  position: relative;
-  width: 100%;
-  height: 210px;
+.home-cal-card {
+  margin: 0 16px;
+  background: var(--forest-card);
+  border: 1px solid var(--card-border-hi);
+  border-radius: var(--radius-lg);
   overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.45), inset 0 1px 0 rgba(196,169,106,0.1);
+  padding: 14px 14px 10px;
 }
 
-.hero-wrap img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.hero-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to bottom,
-    rgba(5,4,2,0.15) 0%,
-    rgba(5,4,2,0.0) 40%,
-    rgba(5,4,2,0.85) 100%
-  );
-}
-
-.hero-weather {
-  position: absolute;
-  bottom: 12px;
-  left: 16px;
-  right: 16px;
-  font-size: 13px;
-  color: var(--text-warm);
+.home-cal-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.cal-nav-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 6px 13px;
+  color: var(--text-warm);
+  font-size: 15px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.cal-nav-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
+
+.home-cal-title { text-align: center; display: flex; align-items: baseline; gap: 6px; }
+.home-cal-month { font-family: var(--font-serif); font-size: 17px; color: var(--gold); }
+.home-cal-year  { font-size: 12px; color: var(--text-muted); }
+
+.home-cal-chips {
+  display: flex;
+  justify-content: center;
   gap: 8px;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .weather-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(8,10,4,0.75);
+  background: rgba(255,255,255,0.05);
   border: 1px solid var(--gold-dim);
   border-radius: 20px;
   padding: 4px 12px;
-  font-size: 13px;
-  backdrop-filter: blur(4px);
+  font-size: 12px;
+  color: var(--text-warm);
 }
+
+.dow-row {
+  display: grid;
+  grid-template-columns: repeat(7,1fr);
+  padding: 0 2px 4px;
+}
+.dow-row div {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.home-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7,1fr);
+  gap: 3px;
+}
+
+.home-cal-link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--gold-dim);
+  margin-top: 10px;
+  padding-top: 10px;
+  color: var(--gold);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  text-align: center;
+}
+.home-cal-link:hover { color: var(--gold-bright); }
 
 /* ============================================================
    BULLETINS PANEL

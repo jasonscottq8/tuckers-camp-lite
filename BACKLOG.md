@@ -9,23 +9,44 @@ The next deep pass should be dedicated to these two themes, not features.
 
 ### Safety (do first)
 
-- **Firestore security rules are wide open.** Current rule:
-  `allow read, write: if request.auth != null` on every document. That means any
-  signed-in member can read *and overwrite/delete* anything — every other
-  member's harvests, the whole feed, bulletins, guest keys, the admin log — and
-  can promote their own account to admin with a one-line
-  `updateDoc(doc(db,'users',myUid),{role:'admin'})`. Tighten to:
-  per-user write on own `users/{uid}` doc (but NOT the `role` field — admin
-  only), authors can edit/delete their own content, admins can do the rest,
-  reads scoped sensibly. Same for Storage (currently any auth write anywhere
-  under 25 MB).
-- **Password policy is weak** — `doChangePassword` only requires 6 characters.
-  Consider raising the minimum and/or enabling Firebase's built-in password
-  policy + email-enumeration protection.
-- **Two-factor auth.** Priorities / cost (project is on Blaze, everything free
-  so far at ~12 users):
-  1. Turn on Google-account 2-step verification for the account that owns the
-     `tucker-s-camp` project — free, do first, protects the whole backend.
+- **Firestore + Storage rules — DONE in lite-2.15.0, tightened in lite-2.16.0**
+  (`firestore.rules`, `storage.rules` in the repo). Self-role-change blocked,
+  admin log append-only, content create locked to author, delete author-or-admin,
+  config public-read for the camp-code check.
+  **2026-09-19 stress test found the app.js UI hid edit/delete buttons from
+  non-owners correctly, but the RULES underneath were too loose — `update` on
+  harvests/trailcam/feed was `if signedIn()` for anyone, letting a non-owner
+  overwrite a post's actual content (not just add a comment/reaction), i.e.
+  "edit someone else's message." Fixed:** rule now allows a non-owner to change
+  ONLY the `comments`/`reactions` fields (`onlyCommentsOrReactions()` — a
+  `diff().affectedKeys()` check); everything else needs to be the author or an
+  admin. Storage delete was `if request.auth != null` (anyone could delete any
+  file) — fixed to require the requester's uid match the uploader-prefixed
+  filename (`<uid>_<timestamp>...`, already the naming convention every upload
+  used) or admin (via `firestore.get()` cross-service rule). Also added
+  client-side re-verification inside `editComment`/`deleteComment` themselves
+  (not just the button-render gate) as defense in depth. *Remaining gap:* the
+  rule can't tell WHICH comment in the shared array a non-owner touched, only
+  that they didn't touch other fields — a determined non-owner could still
+  edit/delete someone else's individual comment via a raw Firestore call. Fully
+  closing that needs the comments subcollection refactor (post-stress-test
+  item #1) — this pass is a strong mitigation, not the complete fix.
+- **Stats-corrupting multi-user bugs — DONE (lite-2.16.0).** Found in the same
+  audit: (a) `saveHarvest` on edit reassigned `uid`/`memberName`/avatar to
+  whoever clicked Save — so an admin editing another member's harvest silently
+  took credit for their trophy. Fixed: edits now preserve the original owner's
+  identity from the existing doc. (b) `deleteHarvest` and `adminDeleteHarvest`
+  adjusted the ACTING user's kill points/totalKills instead of the harvest
+  owner's — an admin deleting someone else's harvest corrupted the admin's own
+  stats and left the owner's inflated. Fixed: points are now adjusted on the
+  harvest's actual `uid`.
+- **Password policy — mostly DONE.** `doChangePassword` + sign-up now require 8
+  chars. Email-enumeration protection: **enabled in the console** (2026-08-30).
+  Firebase's built-in password-strength policy: still available to toggle if
+  wanted, not critical.
+- **Two-factor auth.**
+  1. Google-account 2-step verification on the project-owner account —
+     **DONE (2026-08-30).**
   2. Optional member 2FA via Firebase Auth MFA. Enabling it upgrades the
      project to Identity Platform (free tier 50k MAU, so free at our size, but
      it's a semi-one-way door — do it deliberately in this sweep).
@@ -33,11 +54,11 @@ The next deep pass should be dedicated to these two themes, not features.
      - SMS second factor: ~1–5¢ per text + needs abuse protection. Avoid unless
        members won't use an authenticator app.
      Recommend TOTP-only.
-- **Guest access model** needs a look — guest "sessions" are pure client-side
-  `sessionStorage` with no Firebase auth, so a forged `role:'admin'` in
-  sessionStorage would show the admin UI (writes would fail at the rules layer,
-  but it's confusing and leaks the layout). Verify guests can actually read what
-  they're supposed to and nothing more.
+- **Guest access — REMOVED in lite-2.15.0.** Guest keys are gone entirely
+  (collection, admin panel, `sessionStorage` session, all `isGuest` guards).
+  Everyone has a real Firebase account. New members self-register on the sign-in
+  screen with a hashed camp code (admin sets/opens it under Admin → Sign-ups;
+  `config/signup` doc `{codeHash, open}`).
 - **Compromised-password notification** (user reported one from their password
   manager / browser, 2026-08-29): treat as a prompt to (a) rotate the affected
   password and turn on 2FA for the Google/Firebase project account, (b) review
@@ -87,67 +108,66 @@ The next deep pass should be dedicated to these two themes, not features.
 
 ## Post-stress-test fix list
 
-1. **Comment race / lost comments.**
+1. **Comment race / lost comments — STILL OPEN (the big one).**
    Comments are stored as an array on the post/harvest/photo doc and saved with
-   read-modify-write (`getDoc` → `push` → `updateDoc`). Two people commenting on
-   the same item within the same moment can overwrite each other. Same for
-   edit/delete comment.
-   *Proper fix:* move comments to a Firestore subcollection
-   (`feed/{id}/comments/{commentId}`), or at minimum use a transaction.
-   Affects: `submitFeedComment`, `submitHarvestComment`, `submitTcComment`,
-   `editComment`, `deleteComment`.
+   read-modify-write. Two people commenting on the same item at once can
+   overwrite each other. *Proper fix:* move comments to a subcollection
+   (`feed/{id}/comments/{commentId}`). Affects: `submitFeedComment`,
+   `submitHarvestComment`, `submitTcComment`, `editComment`, `deleteComment`.
+   **Doing this ALSO lets us tighten the Firestore rules** — right now
+   `update` on harvests/trailcam/feed has to be `if signedIn()` (any member)
+   precisely because comments/reactions write to the parent doc. Once comments
+   move to subcollections, parent-doc `update` can go to author-or-admin.
+   This is its own focused session — schema change + migrate existing array
+   comments + update 5 functions + listeners + then the rules.
 
-2. **Orphaned Storage files.**
-   Deleting a harvest, trail cam photo, feed post, or contest entry removes the
-   Firestore doc but not the image file in Cloud Storage. Files accumulate
-   forever.
-   *Proper fix:* on delete, also `deleteObject(ref(storage, ...))` for the
-   photo URL (parse the path out of the download URL, or store the storage path
-   alongside the URL when uploading).
-   Note: the admin "keep photo in the log" option deliberately keeps the file —
-   don't delete when `keepPhoto` is true.
+2. **Orphaned Storage files — DONE (lite-2.15.2).** `deleteStoredImage(url)`
+   helper wired into `deleteHarvest` / `deleteTcPhoto` / `deleteFeedPost` and
+   the three admin delete paths (skipped when the admin's "keep photo" option
+   is chosen). Best-effort, never throws.
 
-3. **"Change Email" is deprecated.**
-   `updateEmail()` (in `doChangeEmail`) is deprecated by Firebase; projects with
-   email-enumeration protection reject it and require `verifyBeforeUpdateEmail`.
-   Likely fails with a generic "Could not update email."
-   *Proper fix:* switch to `verifyBeforeUpdateEmail` (sends a confirmation link
-   to the new address) and update the success copy to say "check your inbox".
-   Also: the wrong-password branch checks `auth/wrong-password` but modern
-   Firebase returns `auth/invalid-credential` on reauth — update both
-   `doChangeEmail` and `doChangePassword`.
+3. **"Change Email" — DONE (lite-2.15.2).** Now `verifyBeforeUpdateEmail`
+   (confirmation link to the new address); error branches handle
+   `auth/invalid-credential`; `loadUserProfile` picks up the new email on next
+   sign-in. `doChangePassword` also updated for `auth/invalid-credential`.
 
-4. **No real offline support.**
-   The service worker caches the app shell, but `firebase.js` imports the SDK
-   from `https://www.gstatic.com/...`, which the SW can't cache (external
-   origin). With no connection the app shows a blank screen instead of a cached
-   view.
-   *Options:* bundle the Firebase SDK locally and add it to `STATIC_ASSETS`, or
-   accept it and show a friendly "you're offline" screen. Also fix the SW fetch
-   handler to fall back to `/index.html` for uncached navigation requests
-   (deep links break offline right now).
+4. **Offline support — DONE (lite-2.15.2).** The 4 gstatic Firebase SDK files
+   are version-pinned + CORS-enabled and only import `firebase-app.js`, so `sw.js`
+   now caches them (`CDN_ASSETS`, cache-first). Firestore persistence enabled
+   (`persistentLocalCache` in `firebase.js`) so a weak signal shows last-seen
+   data. SW fetch handler falls back to cached `/index.html` for failed
+   navigations. App boots offline instead of showing blank.
 
-5. **`cabinmap.jpg` is 4.2 MB.**
-   Full-res phone photo of the hand-drawn map. Slow first load on camp cell
-   service (cached for a week after, per `firebase.json` headers).
-   *Fix:* resize to ~2000 px wide / ~70% JPEG quality → a few hundred KB with no
-   visible quality loss at the zoom levels the viewer allows. Replace the file
-   in `Images/` with the same name; bump the SW version to force the refresh.
+5. **`cabinmap.jpg` — DONE (lite-2.15.2).** Was 6144×8160 / 4.2 MB → 2000×2656
+   / 712 KB (q72), same filename. Still fully readable at the viewer's zoom.
 
 ## UI changes to make
 
-- **Remove "Tag Animals in Photo" from the trail cam photo expansion / lightbox.**
-  Not needed — a comment or a reaction emoji is enough on a trail cam photo.
-  Remove the tag pill row (`renderTcTagPills` call in `renderTcLightboxBody`,
-  the `#tc-tag-list` block) and the `toggleTcTag` handler. **Also remove the
-  "🔍 Filter Photos" tag filter** on the trail cam feed (`openTcFilterModal`,
-  `closeTcFilterModal`, `toggleTcFilterPill`, `applyTcFilters`, `clearTcFilters`,
-  `tcActiveAnimals`, the filter bar in `renderTrailCamScreen`, and the filter
-  branch in `renderTcFeed`) — confirmed, for consistency. `TC_ANIMALS` and the
-  `animalTags` field can stay in old docs; just stop reading/writing them, and
-  drop the tag-icon summary from the collapsed row header too.
+- **Trail cam animal tags — DONE (lite-2.15.2).** Removed `TC_ANIMALS`,
+  `tcActiveAnimals`, `renderTcTagPills`, `toggleTcTag`, `openTcFilterModal` +
+  the whole filter machinery, the "Tag Animals in Photo" lightbox block, row-
+  header tag icons, `tcCard` tag line, compare-view tag overlay, and
+  `animalTags: []` on upload. Dead stub names removed from `index.html`.
+  Old docs keep their `animalTags` field (ignored).
 
 ## Feature ideas
+
+### Home screen — SHIPPED in lite-2.16.0
+
+The front page now leads with a live mini calendar (`renderHomeCalendarCard`,
+`initHomeCalendar`) instead of the `cabinpicture.jpg` hero photo — weather and
+today's moon phase sit as chips in its header, tapping a day opens the same day
+sheet as the full Calendar screen. Day cells (home + full Calendar, shared via
+`monthDayCell`/`monthGridCellsHTML`) dropped the occupancy fill-and-headcount
+gauge for a plain red dot on any day with activity, gold ring on days you're on
+— meant to read instinctively ("why's that dot there?") rather than be parsed.
+Quick Access became "Quick Actions": long rectangular blaze-orange buttons
+(`.action-btn`, same gradient as the existing back-button) that jump straight
+into the action — Log Harvest → `openAddHarvest()`, Message Camp →
+`openFeedCompose()`, Trail Cam, Trophy Room — not just navigation. Month nav
+and add/delete-visit now refresh whichever calendar surface(s) are on screen
+via a shared `refreshAllCalendarViews()`. `cabinpicture.jpg` is unreferenced
+now (left in `Images/`, dropped from the SW precache list).
 
 ### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 

@@ -1,0 +1,118 @@
+rules_version = '2';
+
+// Tucker's Camp Lite — Firestore security rules
+// Model: a small private camp. Every real user has a users/{uid} doc.
+// - anyone signed in can READ member content (names, harvests, feed, calendar…)
+// - you can only CREATE content as yourself, and DELETE only your own (or admin)
+// - nobody can change their own role — admin only
+// - the admin log is append-only
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function uid()      { return request.auth.uid; }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(uid()))
+        && get(/databases/$(database)/documents/users/$(uid())).data.role == 'admin';
+    }
+    function ownsNew() { return signedIn() && request.resource.data.uid == uid(); }
+    function ownsOld() { return signedIn() && resource.data.uid == uid(); }
+    // A non-owner may only touch the comments/reactions maps (read-modify-write
+    // for the shared comment/reaction UI) — never the post's own content.
+    function onlyCommentsOrReactions() {
+      return signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments', 'reactions']);
+    }
+
+    // ---- sign-up config -------------------------------------------------
+    // { codeHash, open } — public read so the Create Account form can check
+    // the (hashed) camp code before anyone is authenticated. Admin-only write.
+    match /config/{doc} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ---- member profiles ----------------------------------------------
+    match /users/{userId} {
+      allow read:   if signedIn();
+      allow create: if uid() == userId
+                    && request.resource.data.role == 'user';
+      allow update: if isAdmin()
+                    || (uid() == userId
+                        && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // ---- member-authored content ------------------------------------
+    // Comments and reactions are stored on the parent doc (read-modify-write).
+    // A non-owner may update ONLY those two fields (see onlyCommentsOrReactions) —
+    // the post's own content can only be changed by its author or an admin.
+    // Create is locked to the author; delete is author-or-admin.
+    match /harvests/{id} {
+      allow read:   if signedIn();
+      allow create: if ownsNew();
+      allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
+      allow delete: if ownsOld() || isAdmin();
+    }
+    match /trailcam/{id} {
+      allow read:   if signedIn();
+      allow create: if ownsNew();
+      allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
+      allow delete: if ownsOld() || isAdmin();
+    }
+    match /trailcamAlbums/{id} {
+      allow read:   if signedIn();
+      allow create: if ownsNew();
+      allow update: if ownsOld() || isAdmin();   // photo counts are bumped by the album's own uploader
+      allow delete: if ownsOld() || isAdmin();
+    }
+    match /feed/{id} {
+      allow read:   if signedIn();
+      allow create: if ownsNew();           // auto events now carry the triggerer's uid
+      allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
+      allow delete: if isAdmin() || ownsOld();
+    }
+
+    // ---- calendar + contests ----------------------------------------
+    match /visits/{id} {
+      allow read:   if signedIn();
+      allow create: if ownsNew();
+      allow update: if ownsOld() || isAdmin();
+      allow delete: if ownsOld() || isAdmin();
+    }
+    match /contestEntries/{id} {
+      allow read:   if signedIn();
+      allow create: if ownsNew();
+      allow update: if ownsOld() || isAdmin();
+      allow delete: if ownsOld() || isAdmin();
+    }
+    match /contestMeta/{id} {
+      allow read:  if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---- admin-only --------------------------------------------------
+    match /bulletins/{id} {
+      allow read:  if signedIn();
+      allow write: if isAdmin();
+    }
+    match /adminLog/{id} {
+      allow read:   if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;       // append-only, even for admins
+    }
+
+    // ---- legacy (guest keys removed) ------------------------------
+    match /guestKeys/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---- everything else is denied --------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

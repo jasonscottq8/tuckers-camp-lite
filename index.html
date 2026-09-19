@@ -25,14 +25,13 @@
   <h1 class="login-title">Tucker's Camp</h1>
   <p class="login-subtitle">Members Only</p>
 
-  <!-- Tabs -->
-  <div class="login-tabs">
-    <button class="login-tab active" id="tab-email" onclick="switchLoginTab('email')">Sign In</button>
-    <button class="login-tab" id="tab-guest" onclick="switchLoginTab('guest')">Guest Key</button>
+  <div class="login-seg">
+    <button class="login-seg-btn active" id="seg-signin" onclick="showLoginPane('signin')">Sign In</button>
+    <button class="login-seg-btn" id="seg-signup" onclick="showLoginPane('signup')">Create Account</button>
   </div>
 
-  <!-- Email / Password Form -->
-  <form class="login-form" id="form-email" onsubmit="return false;">
+  <!-- SIGN IN -->
+  <form class="login-form" id="pane-signin" onsubmit="return false;">
     <div class="input-group">
       <label for="login-email">Email</label>
       <input type="email" id="login-email" placeholder="you@email.com" autocomplete="email" />
@@ -41,16 +40,49 @@
       <label for="login-password">Password</label>
       <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
     </div>
-    <button class="btn btn-primary btn-full mt-12" onclick="doLogin()">Sign In</button>
+    <button class="btn btn-primary btn-full mt-12" id="signin-btn" onclick="doLogin()">Sign In</button>
+    <button type="button" class="login-link" onclick="showLoginPane('forgot')">Forgot password?</button>
   </form>
 
-  <!-- Guest Key Form -->
-  <form class="login-form hidden" id="form-guest" onsubmit="return false;">
-    <div class="input-group">
-      <label for="guest-key">Guest Access Key</label>
-      <input type="text" id="guest-key" placeholder="Enter your key" autocapitalize="none" />
+  <!-- CREATE ACCOUNT -->
+  <form class="login-form hidden" id="pane-signup" onsubmit="return false;">
+    <div id="signup-closed" class="login-note hidden">
+      Sign-ups are closed right now. Ask an admin to open them or add you.
     </div>
-    <button class="btn btn-primary btn-full mt-12" onclick="doGuestKeyLogin()">Enter as Guest</button>
+    <div id="signup-fields">
+      <div class="input-group">
+        <label for="signup-code">Camp code</label>
+        <input type="text" id="signup-code" placeholder="Ask an admin" autocapitalize="none" autocomplete="off" />
+      </div>
+      <div class="input-group">
+        <label for="signup-name">Your name</label>
+        <input type="text" id="signup-name" placeholder="First Last or nickname" maxlength="32" autocomplete="name" />
+      </div>
+      <div class="input-group">
+        <label for="signup-email">Email</label>
+        <input type="email" id="signup-email" placeholder="you@email.com" autocomplete="email" />
+      </div>
+      <div class="input-group">
+        <label for="signup-password">Password</label>
+        <input type="password" id="signup-password" placeholder="At least 8 characters" autocomplete="new-password" />
+      </div>
+      <div class="input-group">
+        <label>Avatar color</label>
+        <div class="avatar-swatches" id="signup-swatches"></div>
+      </div>
+      <button class="btn btn-primary btn-full mt-12" id="signup-btn" onclick="doSignup()">Create Account</button>
+    </div>
+  </form>
+
+  <!-- FORGOT PASSWORD -->
+  <form class="login-form hidden" id="pane-forgot" onsubmit="return false;">
+    <p class="login-note">Enter your email and we'll send a reset link.</p>
+    <div class="input-group">
+      <label for="forgot-email">Email</label>
+      <input type="email" id="forgot-email" placeholder="you@email.com" autocomplete="email" />
+    </div>
+    <button class="btn btn-primary btn-full mt-12" id="forgot-btn" onclick="doForgotPassword()">Send Reset Link</button>
+    <button type="button" class="login-link" onclick="showLoginPane('signin')">← Back to sign in</button>
   </form>
 
   <!-- Update check on login screen -->
@@ -390,7 +422,8 @@
     };
 
     var fns = [
-      'doLogin','doGuestKeyLogin','switchLoginTab','saveNameSetup','doLogout',
+      'doLogin','doSignup','doForgotPassword','showLoginPane','saveNameSetup','doLogout',
+      'adminSetCampCode','submitCampCode','adminToggleSignups',
       'checkForUpdate','applyUpdate','goHome','goMap','goHarvest','goTrailCam',
       'goFeed','openDrawer','closeDrawer','openNotifications','fabAction','goTo',
       'saveSettings','closeHarvestForm','saveHarvest','closeTcUpload','saveTcPhotos',
@@ -398,22 +431,21 @@
       'closeDrawerAndGoHome','showScreen','toggleAdminSection','toggleSettingsSection',
       'saveProfileSettings','saveNotifPrefs','openChangeEmail','doChangeEmail',
       'openChangePassword','doChangePassword','sendResetEmail','clearAppCache',
-      'submitAdminAction','submitBulletin','submitGuestKey','toggleChangelog',
+      'submitAdminAction','submitBulletin','toggleChangelog',
       'toggleLogEntry','updateHarvestFields',
       'updateDeerFields','openPostBulletin','loadMoreFeed','toggleFeedComments',
       'toggleHarvestRow','openAddHarvest','openEditHarvest','deleteHarvest',
       'openAddTrailCam','toggleTcRow','openTcLightbox','closeTcLightbox',
-      'openTcFilterModal','applyTcFilters','clearTcFilters','toggleCompareFilter',
+      'toggleCompareFilter',
       'openCompareDateFilter','applyCompareDateFilter','openCompareUserFilter',
-      'applyCompareUserFilter','openCompareTagFilter','applyCompareTagFilter',
+      'applyCompareUserFilter',
       'clearCompareFilters','toggleCompareFavorite','adminChangeRole',
-      'adminResetPassword','adminTogglePin','adminDeleteBulletin','adminToggleGuestKey',
+      'adminResetPassword','adminTogglePin','adminDeleteBulletin',
       'adminDeleteFeedPost','adminViewAllPosts','adminViewAllHarvests','adminViewAllTrailCam',
       'toggleHarvestPhoto','filterHarvests','openHarvestCompare','addHarvestReaction',
       'submitHarvestComment','addFeedReaction','submitFeedComment','deleteFeedPost',
-      'addTcReaction','submitTcComment','deleteTcPhoto','toggleTcTag',
-      'toggleTcFilterPill','closeTcFilterModal','toggleCompareTagPill',
-      'renderMyKillsScreen','renderAdminScreen','adminPostBulletin','adminCreateGuestKey',
+      'addTcReaction','submitTcComment','deleteTcPhoto',
+      'renderMyKillsScreen','renderAdminScreen','adminPostBulletin',
       'doCheckout','confirmCheckout','finishCheckout','goodChoice',
       'forceUpdate','selectCmpUser','selectCmpPhoto','toggleCmpSection',
       'openHarvestCompare','loadMoreFeed',

@@ -5,9 +5,10 @@
 import { auth, db, storage } from "./firebase.js";
 import {
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateEmail,
+  verifyBeforeUpdateEmail,
   updatePassword,
   sendPasswordResetEmail,
   reauthenticateWithCredential,
@@ -34,13 +35,14 @@ import {
 import {
   ref,
   uploadBytes,
-  getDownloadURL
+  getDownloadURL,
+  deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.14.4";
+const APP_VERSION = "lite-2.16.0";
 
 
 
@@ -149,6 +151,14 @@ function safeColor(c) {
   return /^#[0-9a-fA-F]{3,8}$/.test(String(c || "")) ? String(c) : "#556B2F";
 }
 
+// Best-effort delete of an uploaded image from Storage when its record is
+// removed. Never throws — an already-gone file or a non-Storage URL is fine.
+async function deleteStoredImage(url) {
+  if (!url || typeof url !== "string" || !url.includes("firebasestorage")) return;
+  try { await deleteObject(ref(storage, url)); }
+  catch (err) { if (err?.code !== "storage/object-not-found") console.warn("Storage cleanup:", err?.code || err); }
+}
+
 
 // ============================================================
 // STATE
@@ -183,13 +193,17 @@ document.addEventListener("DOMContentLoaded", () => {
   if (verEl) verEl.textContent = APP_VERSION.replace(/^lite-/, "v");
 
   onAuthStateChanged(auth, async (fbUser) => {
+    if (signupInProgress) return;   // doSignup drives the flow itself
     if (fbUser) {
       currentUser = fbUser;
+      maybeAutoUpdate();            // pull the latest version on the way in
       await loadUserProfile(fbUser.uid);
     } else {
       currentUser = null;
       userProfile = null;
       showLoginScreen();
+      openAutoUpdateWindow(0);      // at the door — safe to refresh silently
+      maybeAutoUpdate();
     }
   });
 
@@ -200,25 +214,60 @@ document.addEventListener("DOMContentLoaded", () => {
 // ============================================================
 // SERVICE WORKER
 // ============================================================
+// Auto-refresh window: while this is open (login screen, and the first ~30s
+// after signing in) a new version is applied silently. Outside it — i.e. mid-
+// session — we show the update banner instead of yanking the page.
+let autoUpdateOK       = true;
+let autoUpdateReloading = false;
+let _autoUpdateGrace   = null;
+
+function openAutoUpdateWindow(ms) {
+  autoUpdateOK = true;
+  clearTimeout(_autoUpdateGrace);
+  if (ms) _autoUpdateGrace = setTimeout(() => { autoUpdateOK = false; }, ms);
+}
+
+function handleReadyWorker(worker) {
+  if (!worker) return;
+  if (autoUpdateOK && !autoUpdateReloading) {
+    autoUpdateReloading = true;
+    worker.postMessage({ type: "SKIP_WAITING" });   // → controllerchange → reload
+  } else {
+    pendingSW = worker;
+    document.getElementById("update-banner")?.classList.remove("hidden");
+  }
+}
+
+// Silently check for and apply a pending update. Safe to call often.
+function maybeAutoUpdate() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.getRegistration().then(reg => {
+    if (!reg) return;
+    if (reg.waiting) { handleReadyWorker(reg.waiting); return; }
+    reg.update()
+      .then(() => setTimeout(() => { if (reg.waiting) handleReadyWorker(reg.waiting); }, 1500))
+      .catch(() => {});
+  }).catch(() => {});
+}
+
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
 
   navigator.serviceWorker.register("/sw.js").then((reg) => {
-    // Check for updates on load
     reg.update();
 
     reg.addEventListener("updatefound", () => {
       const newWorker = reg.installing;
+      if (!newWorker) return;
       newWorker.addEventListener("statechange", () => {
         if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-          pendingSW = newWorker;
-          document.getElementById("update-banner").classList.remove("hidden");
+          handleReadyWorker(reg.waiting || newWorker);
         }
       });
     });
   });
 
-  // When SW takes control, reload to activate new version
+  // When a new SW takes control, reload to run the new version
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!refreshing) {
@@ -269,82 +318,132 @@ window.forceUpdate = async function () {
 };
 
 // ============================================================
-// AUTH — LOGIN
+// AUTH — SIGN IN / CREATE ACCOUNT / RESET
 // ============================================================
-window.switchLoginTab = function (tab) {
-  document.getElementById("tab-email").classList.toggle("active", tab === "email");
-  document.getElementById("tab-guest").classList.toggle("active", tab === "guest");
-  document.getElementById("form-email").classList.toggle("hidden", tab !== "email");
-  document.getElementById("form-guest").classList.toggle("hidden", tab !== "guest");
+let signupInProgress = false;
+
+window.showLoginPane = function (pane) {
+  ["signin", "signup", "forgot"].forEach(p => {
+    document.getElementById("pane-" + p)?.classList.toggle("hidden", p !== pane);
+  });
+  document.getElementById("seg-signin")?.classList.toggle("active", pane === "signin");
+  document.getElementById("seg-signup")?.classList.toggle("active", pane === "signup");
+  if (pane === "signup") refreshSignupAvailability();
 };
+
+// hashed camp code + open flag — a public-readable config doc
+async function loadSignupConfig() {
+  try {
+    const snap = await getDoc(doc(db, "config", "signup"));
+    return snap.exists() ? snap.data() : null;
+  } catch (_) { return null; }
+}
+async function refreshSignupAvailability() {
+  const cfg  = await loadSignupConfig();
+  const open = !!(cfg && cfg.open && cfg.codeHash);
+  document.getElementById("signup-closed")?.classList.toggle("hidden", open);
+  document.getElementById("signup-fields")?.classList.toggle("hidden", !open);
+}
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function normalizeCode(c) { return (c || "").trim().toLowerCase().replace(/\s+/g, ""); }
 
 window.doLogin = async function () {
   const email    = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
-
-  if (!email || !password) {
-    showToast("Please enter your email and password.", "error");
-    return;
-  }
-
+  if (!email || !password) { showToast("Enter your email and password.", "error"); return; }
+  const btn = document.getElementById("signin-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
   try {
     await signInWithEmailAndPassword(auth, email, password);
     // onAuthStateChanged handles the rest
   } catch (err) {
     console.error("Login error:", err.code);
-    const msg = friendlyAuthError(err.code);
-    showToast(msg, "error");
+    showToast(friendlyAuthError(err.code), "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
   }
 };
 
-window.doGuestKeyLogin = async function () {
-  const key = document.getElementById("guest-key").value.trim();
-  if (!key) {
-    showToast("Please enter a guest key.", "error");
-    return;
-  }
-
+window.doForgotPassword = async function () {
+  const email = document.getElementById("forgot-email").value.trim();
+  if (!email) { showToast("Enter your email.", "error"); return; }
+  const btn = document.getElementById("forgot-btn");
+  if (btn) btn.disabled = true;
   try {
-    // Look up guest key in Firestore
-    const q = query(collection(db, "guestKeys"), where("key", "==", key), where("active", "==", true));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      showToast("Invalid or inactive guest key.", "error");
+    await sendPasswordResetEmail(auth, email);
+    showToast("If that email has an account, a reset link is on its way.", "success");
+    showLoginPane("signin");
+  } catch (err) {
+    console.error("Reset error:", err.code);
+    showToast(friendlyAuthError(err.code), "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.doSignup = async function () {
+  const code   = document.getElementById("signup-code").value;
+  const name   = document.getElementById("signup-name").value.trim();
+  const email  = document.getElementById("signup-email").value.trim();
+  const pass   = document.getElementById("signup-password").value;
+  const swatch = document.querySelector("#signup-swatches .avatar-swatch.selected");
+  const color  = swatch ? swatch.dataset.color : AVATAR_COLORS[0];
+  const btn    = document.getElementById("signup-btn");
+
+  if (!code)            { showToast("Enter the camp code.", "error"); return; }
+  if (name.length < 2)  { showToast("Enter your name.", "error"); return; }
+  if (!email)           { showToast("Enter your email.", "error"); return; }
+  if (pass.length < 8)  { showToast("Password needs at least 8 characters.", "error"); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+  try {
+    const cfg = await loadSignupConfig();
+    if (!cfg || !cfg.open || !cfg.codeHash) {
+      showToast("Sign-ups are closed right now.", "error");
+      refreshSignupAvailability();
+      return;
+    }
+    if (await sha256Hex(normalizeCode(code)) !== cfg.codeHash) {
+      showToast("That camp code isn't right.", "error");
       return;
     }
 
-    // Store guest session in sessionStorage
-    const keyDoc = snap.docs[0].data();
-    sessionStorage.setItem("guestSession", JSON.stringify({
-      uid: "guest-" + snap.docs[0].id,
-      displayName: keyDoc.label || "Guest",
-      initials: "GU",
-      color: AVATAR_COLORS[0],
-      role: "guest",
-      isGuest: true
-    }));
-
-    userProfile = JSON.parse(sessionStorage.getItem("guestSession"));
-    currentUser = { uid: userProfile.uid, isGuest: true };
+    signupInProgress = true;
+    if (btn) btn.textContent = "Creating account…";
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    const uid  = cred.user.uid;
+    const finalInitials = initials(name);
+    await setDoc(doc(db, "users", uid), {
+      displayName: name,
+      initials:    finalInitials,
+      color,
+      role:        "user",
+      email,
+      createdAt:   serverTimestamp(),
+      updatedAt:   serverTimestamp()
+    });
+    currentUser = cred.user;
+    userProfile = { uid, displayName: name, initials: finalInitials, color, role: "user" };
+    signupInProgress = false;
+    showToast("Welcome to Tucker's Camp!", "success");
     enterApp();
   } catch (err) {
-    console.error("Guest key error:", err);
-    showToast("Could not verify guest key. Try again.", "error");
+    signupInProgress = false;
+    console.error("Signup error:", err.code || err);
+    showToast(friendlyAuthError(err.code), "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Create Account"; }
   }
 };
 
 window.doLogout = function () {
-  appConfirm("Sign Out", "Are you sure you want to sign out?", async () => {
+  appConfirm("Sign Out", "Sign out of Tucker's Camp?", async () => {
     closeDrawer();
-    sessionStorage.removeItem("guestSession");
-    if (currentUser?.isGuest) {
-      currentUser = null;
-      userProfile = null;
-      showLoginScreen();
-    } else {
-      await signOut(auth);
-      // onAuthStateChanged will call showLoginScreen
-    }
+    try { await signOut(auth); } catch (_) {}
+    // onAuthStateChanged calls showLoginScreen
   });
 };
 
@@ -354,9 +453,12 @@ function friendlyAuthError(code) {
     case "auth/user-not-found":           return "No account found with that email.";
     case "auth/wrong-password":           return "Wrong password. Try again.";
     case "auth/invalid-credential":       return "Email or password is incorrect.";
+    case "auth/email-already-in-use":     return "There's already an account with that email — try signing in.";
+    case "auth/weak-password":            return "That password is too weak — use at least 8 characters.";
+    case "auth/missing-password":         return "Enter a password.";
     case "auth/too-many-requests":        return "Too many attempts. Please wait a moment.";
     case "auth/network-request-failed":   return "Network error. Check your connection.";
-    default:                              return "Sign in failed. Please try again.";
+    default:                              return "Something went wrong. Please try again.";
   }
 }
 
@@ -385,13 +487,14 @@ async function loadUserProfile(uid) {
       displayName: data.displayName,
       initials:    data.initials    || initials(data.displayName),
       color:       data.color       || AVATAR_COLORS[0],
-      role:        data.role        || "user",
-      isGuest:     false
+      role:        data.role        || "user"
     };
 
-    // Backfill the member's email so admins can send password resets.
-    if (!data.email && auth.currentUser?.email) {
-      setDoc(ref, { email: auth.currentUser.email }, { merge: true }).catch(() => {});
+    // Keep the member's email on file (for admin password resets) — backfill it
+    // and pick up any change made via verifyBeforeUpdateEmail.
+    const authEmail = auth.currentUser?.email;
+    if (authEmail && data.email !== authEmail) {
+      setDoc(ref, { email: authEmail }, { merge: true }).catch(() => {});
     }
 
     enterApp();
@@ -412,17 +515,19 @@ function initials(name) {
 // NAME SETUP
 // ============================================================
 function buildAvatarSwatches() {
-  const container = document.getElementById("avatar-swatches");
-  AVATAR_COLORS.forEach((color, i) => {
-    const el = document.createElement("div");
-    el.className  = "avatar-swatch" + (i === 0 ? " selected" : "");
-    el.style.background = color;
-    el.dataset.color = color;
-    el.onclick = () => {
-      document.querySelectorAll(".avatar-swatch").forEach(s => s.classList.remove("selected"));
-      el.classList.add("selected");
-    };
-    container.appendChild(el);
+  document.querySelectorAll(".avatar-swatches").forEach(container => {
+    container.innerHTML = "";
+    AVATAR_COLORS.forEach((color, i) => {
+      const el = document.createElement("div");
+      el.className  = "avatar-swatch" + (i === 0 ? " selected" : "");
+      el.style.background = color;
+      el.dataset.color = color;
+      el.onclick = () => {
+        container.querySelectorAll(".avatar-swatch").forEach(s => s.classList.remove("selected"));
+        el.classList.add("selected");
+      };
+      container.appendChild(el);
+    });
   });
 }
 
@@ -434,7 +539,7 @@ function showNameSetupModal() {
 window.saveNameSetup = async function () {
   const name     = document.getElementById("setup-name").value.trim();
   const inits    = document.getElementById("setup-initials").value.trim().toUpperCase();
-  const selected = document.querySelector(".avatar-swatch.selected");
+  const selected = document.querySelector("#avatar-swatches .avatar-swatch.selected");
   const color    = selected ? selected.dataset.color : AVATAR_COLORS[0];
 
   if (!name) {
@@ -456,7 +561,7 @@ window.saveNameSetup = async function () {
       updatedAt:    serverTimestamp()
     }, { merge: true });
 
-    userProfile = { uid, displayName: name, initials: finalInitials, color, role: "user", isGuest: false };
+    userProfile = { uid, displayName: name, initials: finalInitials, color, role: "user" };
     document.getElementById("name-setup-modal").classList.add("hidden");
     enterApp();
   } catch (err) {
@@ -472,16 +577,21 @@ function showLoginScreen() {
   document.getElementById("app").classList.add("hidden");
   document.getElementById("login-screen").classList.remove("hidden");
   document.getElementById("name-setup-modal").classList.add("hidden");
-  // Clear login fields
-  document.getElementById("login-email").value    = "";
-  document.getElementById("login-password").value = "";
-  document.getElementById("guest-key").value      = "";
+  ["login-email", "login-password", "signup-code", "signup-name",
+   "signup-email", "signup-password", "forgot-email"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  showLoginPane("signin");
 }
 
 function enterApp() {
   document.getElementById("login-screen").classList.add("hidden");
   document.getElementById("name-setup-modal").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
+
+  // keep auto-refresh on for ~30s after entry, then fall back to the banner
+  openAutoUpdateWindow(30000);
 
   // Update drawer user name
   document.getElementById("drawer-user-name").textContent =
@@ -615,30 +725,22 @@ window.openNotifications = function () {
 // HOME SCREEN
 // ============================================================
 function renderHomeScreen() {
-  document.getElementById("home-hero-wrap").innerHTML = `
-    <div class="hero-wrap">
-      <img src="Images/cabinpicture.jpg" alt="Tucker's Camp" />
-      <div class="hero-overlay"></div>
-      <div class="hero-weather">
-        <span class="weather-pill" id="weather-strip">⏳ Loading weather…</span>
-      </div>
-    </div>
-  `;
-  fetchWeather();
-  renderCheckinButton();
+  document.getElementById("home-hero-wrap").innerHTML = `<div id="home-calendar-wrap"></div>`;
+  initHomeCalendar();
 
+  renderCheckinButton();
   loadHomeBulletins();
 
   document.getElementById("home-grid-wrap").innerHTML = `
     <div class="fade-divider" style="margin:16px 16px;"></div>
     <div class="section-header" style="padding-top:0">
-      <div class="section-title">✦ Quick Access</div>
+      <div class="section-title">✦ Quick Actions</div>
     </div>
-    <div class="feature-grid">
-      ${featureGridBtn("🦌", "Harvest Log",    "goHarvest()")}
-      ${featureGridBtn("📷", "Trail Cam",      "goTrailCam()")}
-      ${featureGridBtn(miniCalIcon(new Date(), 32), "Cabin Calendar", "goCalendar()")}
-      ${featureGridBtn("💬", "Feed",            "goFeed()")}
+    <div class="action-stack">
+      ${actionBtn("🦌", "Log Harvest",   "openAddHarvest()")}
+      ${actionBtn("💬", "Message Camp",  "openFeedCompose()")}
+      ${actionBtn("📷", "Trail Cam",     "goTrailCam()")}
+      ${actionBtn("🏆", "Trophy Room",   "goTo('screen-mykills')")}
     </div>
   `;
 
@@ -659,33 +761,50 @@ function renderHomeScreen() {
   `;
 }
 
-function featureGridBtn(icon, label, action) {
-  return `<button class="feature-btn" onclick="${action}">
-    <span class="feat-icon">${icon}</span>
-    <span class="feat-label">${label}</span>
+function actionBtn(icon, label, action) {
+  return `<button class="action-btn" onclick="${action}">
+    <span class="action-icon">${icon}</span>
+    <span class="action-label">${label}</span>
+    <span class="action-chevron">›</span>
   </button>`;
 }
 
-// A little calendar tile that actually shows a real date, instead of the
-// 📅 emoji (which is frozen on July 17 on most phones). Pass a Date to show
-// that day; defaults to today. `size` is the tile edge in px.
-function miniCalIcon(date, size = 34) {
-  const dt  = date instanceof Date ? date : new Date();
-  const mon = dt.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
-  const day = dt.getDate();
-  const numSize = Math.round(size * 0.47);
-  const monSize = Math.max(6, Math.round(size * 0.235));
-  return `<span style="display:inline-flex;flex-direction:column;width:${size}px;height:${size}px;
-    border-radius:${Math.round(size*0.2)}px;overflow:hidden;border:1px solid rgba(0,0,0,0.4);
-    box-shadow:0 2px 5px rgba(0,0,0,0.5);flex-shrink:0">
-    <span style="background:linear-gradient(135deg,var(--orange),var(--orange-bright));
-      color:#fff;font-size:${monSize}px;font-weight:800;letter-spacing:0.5px;text-align:center;
-      padding:2px 0 1px;line-height:1">${mon}</span>
-    <span style="flex:1;display:flex;align-items:center;justify-content:center;
-      background:#f1e8d5;color:#2a2318;font-size:${numSize}px;font-weight:800;line-height:1">${day}</span>
-  </span>`;
+// ── Home screen mini calendar — the front page now leads with "what's
+// happening", not a static photo. Same red-dot grid as the full Calendar
+// screen; tapping a day opens the same day sheet either way. ────────────
+async function initHomeCalendar() {
+  const el = document.getElementById("home-calendar-wrap");
+  if (!el) return;
+  el.innerHTML = `<div class="home-cal-card" style="padding:30px;text-align:center">
+    <div class="spinner" style="margin:0 auto"></div></div>`;
+  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+  renderHomeCalendarCard(el);
 }
 
+function renderHomeCalendarCard(el) {
+  if (!el) return;
+  const year = calCurrentYear, month = calCurrentMonth;
+  const moon = moonPhase(new Date());
+  el.innerHTML = `
+    <div class="home-cal-card">
+      <div class="home-cal-head">
+        <button class="cal-nav-btn" onclick="calPrevMonth()">‹</button>
+        <div class="home-cal-title">
+          <span class="home-cal-month">${CAL_MONTHS[month]}</span>
+          <span class="home-cal-year">${year}</span>
+        </div>
+        <button class="cal-nav-btn" onclick="calNextMonth()">›</button>
+      </div>
+      <div class="home-cal-chips">
+        <span class="weather-pill" id="weather-strip">⏳ Loading weather…</span>
+        <span class="weather-pill" title="${esc(moon.name)}">${moon.icon} ${esc(moon.name)}</span>
+      </div>
+      <div class="dow-row">${CAL_DAYS.map(d => `<div>${d[0]}</div>`).join("")}</div>
+      <div class="home-cal-grid">${monthGridCellsHTML(year, month, "sm")}</div>
+      <button class="home-cal-link" onclick="goCalendar()">Open full calendar →</button>
+    </div>`;
+  fetchWeather();
+}
 
 // ============================================================
 // HOME BULLETINS — load from Firestore, post button for all users
@@ -702,7 +821,7 @@ async function loadHomeBulletins() {
     const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     docs.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
-    const canPost = userProfile && !userProfile.isGuest;
+    const canPost = userProfile;
 
     wrap.innerHTML = `
       <div class="fade-divider" style="margin:14px 16px;"></div>
@@ -1127,7 +1246,7 @@ function renderSettingsSection(id) {
 }
 
 window.saveProfileSettings = async function () {
-  if (userProfile.isGuest) return;
+  if (!userProfile) return;
   const name   = document.getElementById("s-name")?.value.trim();
   const inits  = document.getElementById("s-initials")?.value.trim().toUpperCase();
   const sel    = document.querySelector("#s-swatches .avatar-swatch.selected");
@@ -1147,7 +1266,7 @@ window.saveProfileSettings = async function () {
 };
 
 window.saveNotifPrefs = async function () {
-  if (userProfile.isGuest) return;
+  if (!userProfile) return;
   try {
     const prefs = {
       feed:     document.getElementById("notif_feed")?.checked     || false,
@@ -1167,6 +1286,10 @@ window.openChangeEmail = function () {
   ov.innerHTML = `
     <div class="modal-box" style="max-width:340px">
       <div class="modal-title">✉️ Change Email</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:12px">
+        We'll send a confirmation link to the new address. The change takes effect
+        once you click it.
+      </div>
       <div class="input-group" style="margin-bottom:12px">
         <label>New Email</label>
         <input type="email" id="ce-email" placeholder="new@email.com" />
@@ -1190,12 +1313,18 @@ window.doChangeEmail = async function () {
   try {
     const cred = EmailAuthProvider.credential(auth.currentUser.email, pass);
     await reauthenticateWithCredential(auth.currentUser, cred);
-    await updateEmail(auth.currentUser, newEmail);
+    await verifyBeforeUpdateEmail(auth.currentUser, newEmail);
     document.getElementById("change-email-overlay")?.remove();
-    showToast("Email updated!", "success");
+    showToast("Check your new inbox for a confirmation link.", "success");
   } catch(err) {
     console.error(err);
-    showToast(err.code === "auth/wrong-password" ? "Wrong password." : "Could not update email.", "error");
+    const wrong = err.code === "auth/wrong-password" || err.code === "auth/invalid-credential";
+    showToast(
+      wrong ? "Wrong password."
+      : err.code === "auth/invalid-email" ? "That email address doesn't look right."
+      : "Could not update email.",
+      "error"
+    );
   }
 };
 
@@ -1231,7 +1360,7 @@ window.doChangePassword = async function () {
   const confirm  = document.getElementById("cp-confirm")?.value;
   if (!current || !newPass || !confirm) { showToast("Fill in all fields.", "error"); return; }
   if (newPass !== confirm) { showToast("New passwords don't match.", "error"); return; }
-  if (newPass.length < 6)  { showToast("Password must be at least 6 characters.", "error"); return; }
+  if (newPass.length < 8)  { showToast("Password needs at least 8 characters.", "error"); return; }
   try {
     const cred = EmailAuthProvider.credential(auth.currentUser.email, current);
     await reauthenticateWithCredential(auth.currentUser, cred);
@@ -1240,7 +1369,11 @@ window.doChangePassword = async function () {
     showToast("Password updated!", "success");
   } catch(err) {
     console.error(err);
-    showToast(err.code === "auth/wrong-password" ? "Wrong current password." : "Could not update password.", "error");
+    showToast(
+      (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential")
+        ? "Wrong current password." : "Could not update password.",
+      "error"
+    );
   }
 };
 
@@ -1272,6 +1405,28 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.16.0", date: "Sep 2026", notes: [
+      "The front page now leads with the cabin calendar instead of a photo — weather and moon phase are right there with it",
+      "Calendar days now show a plain red dot on anything going on, instead of a fill and a number",
+      "Quick Actions are now full-width buttons — Log Harvest, Message Camp, Trail Cam, Trophy Room",
+      "Fixed a security gap: a member could edit or delete another member's feed post or comment — locked down to the author or an admin",
+      "Deleting your own harvest, photo, or post file now works correctly no matter who deletes it"
+    ]},
+    { version: "lite-2.15.2", date: "Aug 2026", notes: [
+      "The app now opens on a weak signal — it shows the last data it saw instead of a blank screen",
+      "Trail cam photo tags are gone — a comment or reaction is enough",
+      "Deleting a harvest, photo or post now also removes its image file",
+      "Change Email now sends a confirmation link to the new address",
+      "Shrank the cabin map so it loads faster on camp service"
+    ]},
+    { version: "lite-2.15.1", date: "Aug 2026", notes: [
+      "The app now updates itself when you sign in — no more tapping Check for Update",
+      "Guest keys are gone — everyone uses their own account now",
+      "New members create an account right on the sign-in screen with the camp code (ask an admin for it)",
+      "Added a Forgot password link",
+      "Admins set and open/close the camp code under Admin → Sign-ups",
+      "Tightened database security — you can only edit your own harvests, posts and photos"
+    ]},
     { version: "lite-2.14.4", date: "Aug 2026", notes: [
       "Home-screen app icon reworked — the emblem now fills the icon on a forest-green background, no white ring or box",
       "To pick it up: delete the app from your home screen, clear the site from your browser's site data, then add it again"
@@ -1783,7 +1938,7 @@ function renderContestBoard() {
 
   // Bottom action area
   let action = "";
-  if (!userProfile || userProfile.isGuest) {
+  if (!userProfile) {
     action = "";
   } else if (isClosed) {
     action = isAdmin
@@ -1893,7 +2048,7 @@ window.toggleContestEntry = function (id) {
 // Join a contest for the year — one opt-in doc, deterministic id so it's
 // idempotent. Standings come from the Harvest Log, not from here.
 window.joinContest = async function () {
-  if (!userProfile || userProfile.isGuest) { showToast("Sign in to enter.", "error"); return; }
+  if (!userProfile) { showToast("Sign in to enter.", "error"); return; }
   const c   = CONTESTS[contestTab];
   const key = contestMetaId();
   if (contestData?.contestMeta?.[key]?.closed) { showToast("This season is closed.", "error"); return; }
@@ -2028,7 +2183,7 @@ async function renderAdminScreen() {
       { id:"users",      icon:"👥", title:"User Management",    sub:"Roles, passwords, accounts" },
       { id:"content",    icon:"🛡",  title:"Content Moderation", sub:"Delete posts, harvests, photos" },
       { id:"bulletins",  icon:"📢", title:"Bulletins",          sub:"Post, edit, pin, delete" },
-      { id:"guestkeys",  icon:"🔑", title:"Guest Keys",         sub:"View, create, deactivate" },
+      { id:"signups",    icon:"🎟️", title:"Sign-ups",           sub:"Camp code, open / close" },
       { id:"stats",      icon:"📊", title:"App Stats",          sub:"Users, posts, harvests" },
       { id:"log",        icon:"📋", title:"Admin Log",          sub:"All admin actions" }
     ].map(s => `
@@ -2074,7 +2229,7 @@ async function loadAdminSection(id) {
       case "users":     await renderAdminUsers(inner);     break;
       case "content":   await renderAdminContent(inner);   break;
       case "bulletins": await renderAdminBulletins(inner); break;
-      case "guestkeys": await renderAdminGuestKeys(inner); break;
+      case "signups":   await renderAdminSignups(inner);   break;
       case "stats":     await renderAdminStats(inner);     break;
       case "log":       await renderAdminLog(inner);       break;
     }
@@ -2108,9 +2263,8 @@ async function renderAdminUsers(inner) {
             <select id="role-${u.id}"
               style="flex:1;background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
                      border-radius:var(--radius-sm);color:var(--text-warm);padding:6px 8px;font-size:12px">
-              <option value="user"  ${u.role==="user" ?"selected":""}>User</option>
+              <option value="user"  ${u.role!=="admin"?"selected":""}>Member</option>
               <option value="admin" ${u.role==="admin"?"selected":""}>Admin</option>
-              <option value="guest" ${u.role==="guest"?"selected":""}>Guest</option>
             </select>
             <button class="btn btn-secondary btn-sm" onclick="adminChangeRole('${u.id}')">
               Save Role
@@ -2221,6 +2375,7 @@ window.adminDeleteFeedPost = function (id, text, memberName, photoUrl) {
     `Delete this post by ${memberName}?`,
     async (reason, keepPhoto) => {
       await deleteDoc(doc(db, "feed", id));
+      if (!keepPhoto) await deleteStoredImage(photoUrl);
       await writeAdminLog(
         "delete_feed_post",
         { uid: null, name: memberName },
@@ -2243,6 +2398,20 @@ window.adminDeleteHarvest = function (id, data) {
     `Delete this harvest entry by ${data?.memberName}?`,
     async (reason, keepPhoto) => {
       await deleteDoc(doc(db, "harvests", id));
+      if (!keepPhoto) await deleteStoredImage(data?.photoURL);
+      trophyCache = null;
+      if (data?.uid) {
+        try {
+          const userRef  = doc(db, "users", data.uid);
+          const userSnap = await getDoc(userRef);
+          const userData = userSnap.data() || {};
+          const pts      = computeKillPoints(data);
+          await updateDoc(userRef, {
+            killPoints: Math.max(0, (userData.killPoints || 0) - pts),
+            totalKills: Math.max(0, (userData.totalKills || 0) - 1)
+          });
+        } catch (e) { console.error("Kill point adjustment failed:", e); }
+      }
       await writeAdminLog(
         "delete_harvest",
         { uid: data?.uid, name: data?.memberName },
@@ -2264,6 +2433,7 @@ window.adminDeleteTcPhoto = function (id, data) {
     `Delete this photo by ${data?.uploaderName}?`,
     async (reason, keepPhoto) => {
       await deleteDoc(doc(db, "trailcam", id));
+      if (!keepPhoto) await deleteStoredImage(data?.photoURL);
       await writeAdminLog(
         "delete_trailcam",
         { uid: data?.uid, name: data?.uploaderName },
@@ -2373,89 +2543,101 @@ window.adminDeleteBulletin = function (id, text) {
   );
 };
 
-async function renderAdminGuestKeys(inner) {
-  const snap = await getDocs(collection(db, "guestKeys"));
-  _adminDocCache = {};
-  snap.docs.forEach(d => { _adminDocCache[d.id] = { id: d.id, ...d.data() }; });
+async function renderAdminSignups(inner) {
+  let cfg = null;
+  try {
+    const snap = await getDoc(doc(db, "config", "signup"));
+    cfg = snap.exists() ? snap.data() : null;
+  } catch (_) {}
+  const hasCode = !!(cfg && cfg.codeHash);
+  const open    = !!(cfg && cfg.open && cfg.codeHash);
+
   inner.innerHTML = `
-    <div style="margin-bottom:12px">
-      <button class="btn btn-primary btn-full" onclick="adminCreateGuestKey()">
-        ➕ Create New Guest Key
-      </button>
+    <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:14px">
+      New members create their own account on the sign-in screen using the camp
+      code. Change it or close sign-ups if the code gets out.
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      ${snap.empty ? `<div style="color:var(--text-muted);font-size:13px;font-style:italic">No guest keys.</div>` :
-        snap.docs.map(d => {
-          const k = d.data();
-          return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);padding:10px">
-            <div style="display:flex;align-items:center;justify-content:space-between">
-              <div>
-                <div style="font-size:14px;font-weight:600;color:var(--text-warm);font-family:monospace">${esc(k.key)}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${esc(k.label||"Guest")} · ${k.active?"Active":"Inactive"}</div>
-              </div>
-              <button class="btn ${k.active?"btn-danger":"btn-secondary"} btn-sm"
-                onclick="adminToggleGuestKey('${d.id}',null,${!!k.active})">
-                ${k.active ? "Deactivate" : "Activate"}
-              </button>
-            </div>
-          </div>`;
-        }).join("")}
+    <div style="background:rgba(255,255,255,0.04);border:1px solid var(--card-border);
+                border-radius:var(--radius-md);padding:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:13px;color:var(--text-warm)">Sign-ups</span>
+        <span style="font-size:12px;font-weight:700;letter-spacing:0.5px;
+                     color:${open ? "var(--gold)" : "var(--danger)"}">
+          ${open ? "OPEN" : "CLOSED"}
+        </span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        ${hasCode
+          ? (cfg.updatedByName ? `Code last set by ${esc(cfg.updatedByName)}.` : "A camp code is set.")
+          : "No camp code set yet — set one to allow sign-ups."}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="adminSetCampCode()">
+          ${hasCode ? "Change code" : "Set code"}
+        </button>
+        ${hasCode ? `<button class="btn btn-secondary btn-sm" onclick="adminToggleSignups(${open})">
+          ${open ? "Close sign-ups" : "Open sign-ups"}
+        </button>` : ""}
+      </div>
     </div>`;
 }
 
-window.adminCreateGuestKey = function () {
+window.adminSetCampCode = function () {
   const ov = document.createElement("div");
-  ov.className = "modal-overlay"; ov.id = "guestkey-overlay";
+  ov.className = "modal-overlay"; ov.id = "campcode-overlay";
   ov.innerHTML = `
     <div class="modal-box" style="max-width:340px">
-      <div class="modal-title">🔑 New Guest Key</div>
-      <div class="input-group" style="margin-bottom:12px">
-        <label>Key (or leave blank to auto-generate)</label>
-        <input type="text" id="gk-key" placeholder="e.g. TUCKERS2026" />
+      <div class="modal-title">🎟️ Camp code</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5">
+        Members type this when creating an account. Not case-sensitive, spaces
+        ignored. Setting a new code opens sign-ups.
       </div>
       <div class="input-group" style="margin-bottom:16px">
-        <label>Label (who is this for?)</label>
-        <input type="text" id="gk-label" placeholder="e.g. Weekend Guest" />
+        <label>New code</label>
+        <input type="text" id="campcode-input" placeholder="e.g. BuckSeason26" autocapitalize="none" autocomplete="off" />
       </div>
       <div class="modal-actions">
-        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('guestkey-overlay').remove()">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="submitGuestKey()">Create</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('campcode-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="submitCampCode()">Save</button>
       </div>
     </div>`;
   document.body.appendChild(ov);
 };
 
-window.submitGuestKey = async function () {
-  const key   = document.getElementById("gk-key")?.value.trim().toUpperCase() ||
-                Math.random().toString(36).slice(2,8).toUpperCase();
-  const label = document.getElementById("gk-label")?.value.trim() || "Guest";
+window.submitCampCode = async function () {
+  const norm = normalizeCode(document.getElementById("campcode-input")?.value || "");
+  if (norm.length < 4) { showToast("Use at least 4 characters.", "error"); return; }
   try {
-    await addDoc(collection(db, "guestKeys"), { key, label, active: true, createdAt: serverTimestamp() });
-    document.getElementById("guestkey-overlay")?.remove();
-    showToast(`Guest key "${key}" created!`, "success");
-    loadAdminSection("guestkeys");
-  } catch(err) { console.error(err); showToast("Could not create key.", "error"); }
+    const codeHash = await sha256Hex(norm);
+    await setDoc(doc(db, "config", "signup"), {
+      codeHash,
+      open:          true,
+      updatedAt:     serverTimestamp(),
+      updatedByName: userProfile.displayName
+    }, { merge: true });
+    await writeAdminLog("set_camp_code", null, "Camp code changed; sign-ups open", "Camp code rotation", null);
+    document.getElementById("campcode-overlay")?.remove();
+    showToast("Camp code set. Sign-ups are open.", "success");
+    loadAdminSection("signups");
+  } catch (err) { console.error(err); showToast("Could not save the code.", "error"); }
 };
 
-window.adminToggleGuestKey = function (id, key, isActive) {
-  key = key || (_adminDocCache[id] || {}).key || "";
-  if (isActive) {
-    requireReason(
-      "Deactivate Guest Key",
-      `Deactivate key "${key}"? Guests using it will be locked out.`,
-      async (reason) => {
-        await updateDoc(doc(db, "guestKeys", id), { active: false });
-        await writeAdminLog("deactivate_guest_key", null, `Key: ${key}`, reason, null);
-        showToast(`Key "${key}" deactivated.`, "success");
-        loadAdminSection("guestkeys");
-      }, false, null, null
-    );
-  } else {
-    updateDoc(doc(db, "guestKeys", id), { active: true }).then(() => {
-      showToast(`Key "${key}" activated.`, "success");
-      loadAdminSection("guestkeys");
-    }).catch(err => { console.error(err); showToast("Could not activate the key.", "error"); });
-  }
+window.adminToggleSignups = function (isOpen) {
+  const next = !isOpen;
+  appConfirm(
+    next ? "Open sign-ups" : "Close sign-ups",
+    next ? "Anyone with the camp code can create an account."
+         : "No new accounts can be created until you reopen sign-ups.",
+    async () => {
+      try {
+        await setDoc(doc(db, "config", "signup"), { open: next }, { merge: true });
+        await writeAdminLog(next ? "open_signups" : "close_signups", null,
+          next ? "Sign-ups opened" : "Sign-ups closed", "Admin toggle", null);
+        showToast(next ? "Sign-ups opened." : "Sign-ups closed.", "success");
+        loadAdminSection("signups");
+      } catch (err) { console.error(err); showToast("Could not update.", "error"); }
+    }
+  );
 };
 
 async function renderAdminStats(inner) {
@@ -2859,7 +3041,7 @@ function renderHarvestDetailInline(h) {
         <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1" id="reactions-display-${id}">
           ${renderReactionBadges(reactions, id, "harvests")}
         </div>
-        ${userProfile && !userProfile.isGuest ? `
+        ${userProfile ? `
           <button onclick="toggleHarvestReactPicker(\'${id}\')"
             style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
                    border-radius:20px;padding:4px 10px;font-size:13px;cursor:pointer;
@@ -2867,7 +3049,7 @@ function renderHarvestDetailInline(h) {
       </div>
       <div id="harvest-react-picker-${id}" class="hidden"
         style="display:flex;flex-wrap:wrap;gap:5px;padding:2px 0 8px">
-        ${userProfile && !userProfile.isGuest ? REACTIONS_LIST.map(e => `
+        ${userProfile ? REACTIONS_LIST.map(e => `
           <button onclick="addHarvestReaction(\'${id}\',\'${e}\');toggleHarvestReactPicker(\'${id}\')"
             style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
                    border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;
@@ -2881,7 +3063,7 @@ function renderHarvestDetailInline(h) {
         <div id="harvest-comments-${id}">
           ${renderComments(h.comments || [], id, "harvests")}
         </div>
-        ${userProfile && !userProfile.isGuest ? `
+        ${userProfile ? `
           <div style="display:flex;gap:8px;margin-top:10px">
             <input type="text" id="hcomment-${id}" placeholder="Add a comment…"
               style="flex:1"
@@ -2978,7 +3160,7 @@ window.addHarvestReaction = async function (id, emoji) {
 
 // ── Comments ─────────────────────────────────────────────────
 window.submitHarvestComment = async function (id) {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   const input = document.getElementById("hcomment-" + id);
   const text  = input?.value.trim();
   if (!text) return;
@@ -3000,18 +3182,47 @@ window.submitHarvestComment = async function (id) {
   } catch(err) { console.error(err); showToast("Could not post comment.", "error"); }
 };
 
+// Re-render a comment thread after it changes. Feed threads bundle the
+// comment list with the "add a comment" input in one wrapper; harvest/trail
+// cam threads keep the input as a separate sibling.
+function refreshCommentsUI(docId, collName, comments) {
+  const wrap = document.getElementById(
+    collName === "feed" ? "feed-comments-" + docId
+      : collName === "harvests" ? "harvest-comments-" + docId
+      : "tc-lb-comments"
+  );
+  if (!wrap) return;
+  if (collName === "feed") {
+    wrap.innerHTML = `
+      <div class="fade-divider-plain" style="margin:0 0 10px"></div>
+      ${renderComments(comments, docId, "feed")}
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input type="text" id="feed-comment-input-${docId}"
+          placeholder="Add a comment…" style="flex:1"
+          onkeydown="if(event.key==='Enter')submitFeedComment('${docId}')" />
+        <button class="btn btn-primary btn-sm" onclick="submitFeedComment('${docId}')">Post</button>
+      </div>`;
+  } else {
+    wrap.innerHTML = renderComments(comments, docId, collName);
+  }
+}
+
+// A comment can only be touched by whoever wrote it, or an admin — re-verified
+// here (not just at the button level) since these are plain global functions.
+function canTouchComment(comment) {
+  return !!userProfile && !!comment && (comment.uid === userProfile.uid || userProfile.role === "admin");
+}
+
 window.deleteComment = async function (docId, collName, index) {
   appConfirm("Delete Comment", "Remove this comment?", async () => {
     try {
       const ref2     = doc(db, collName, docId);
       const snap     = await getDoc(ref2);
       const comments = snap.data()?.comments || [];
+      if (!canTouchComment(comments[index])) { showToast("You can only delete your own comments.", "error"); return; }
       comments.splice(index, 1);
       await updateDoc(ref2, { comments });
-      const fresh = await getDoc(ref2);
-      const wrapId = collName === "harvests" ? "harvest-comments-" + docId : "tc-lb-comments";
-      const wrap   = document.getElementById(wrapId);
-      if (wrap) wrap.innerHTML = renderComments(fresh.data()?.comments || [], docId, collName);
+      refreshCommentsUI(docId, collName, comments);
     } catch(err) { console.error(err); showToast("Could not delete comment.", "error"); }
   });
 };
@@ -3019,17 +3230,18 @@ window.deleteComment = async function (docId, collName, index) {
 window.editComment = async function (docId, collName, index) {
   const ref2   = doc(db, collName, docId);
   const snap   = await getDoc(ref2);
-  const current = snap.data()?.comments?.[index]?.text || "";
+  const comments0 = snap.data()?.comments || [];
+  if (!canTouchComment(comments0[index])) { showToast("You can only edit your own comments.", "error"); return; }
+  const current = comments0[index]?.text || "";
   appPrompt("Edit Comment", current, async (newText) => {
     if (!newText) return;
     try {
-      const comments = snap.data()?.comments || [];
+      const fresh    = await getDoc(ref2);
+      const comments = fresh.data()?.comments || [];
+      if (!canTouchComment(comments[index])) { showToast("You can only edit your own comments.", "error"); return; }
       comments[index].text = newText;
       await updateDoc(ref2, { comments });
-      const fresh  = await getDoc(ref2);
-      const wrapId = collName === "harvests" ? "harvest-comments-" + docId : "tc-lb-comments";
-      const wrap   = document.getElementById(wrapId);
-      if (wrap) wrap.innerHTML = renderComments(fresh.data()?.comments || [], docId, collName);
+      refreshCommentsUI(docId, collName, comments);
     } catch(err) { console.error(err); showToast("Could not edit comment.", "error"); }
   });
 };
@@ -3083,7 +3295,7 @@ function renderComments(comments, docId, collName) {
 
 // ── Shared addReaction ────────────────────────────────────────
 window.addReaction = async function (docId, collName, emoji) {
-  if (!userProfile || userProfile.isGuest) { showToast("Sign in to react.", "error"); return; }
+  if (!userProfile) { showToast("Sign in to react.", "error"); return; }
   try {
     const ref2      = doc(db, collName, docId);
     const snap      = await getDoc(ref2);
@@ -3104,7 +3316,7 @@ window.addReaction = async function (docId, collName, emoji) {
 
 // ── Add Harvest ───────────────────────────────────────────────
 window.openAddHarvest = function () {
-  if (userProfile?.isGuest) { showToast("Guests cannot add harvests.", "error"); return; }
+  if (!userProfile) { showToast("Sign in to add a harvest.", "error"); return; }
   editingHarvestId  = null;
   harvestDetailData = null;
   showHarvestForm(null);
@@ -3401,16 +3613,20 @@ window.saveHarvest = async function () {
     const quantity      = parseInt(document.getElementById("hf-quantity")?.value)    || 1;
     const weapon        = document.querySelector('input[name="deer-weapon"]:checked')?.value || (species === "deer" ? "firearm" : null);
 
+    // Editing (including an admin editing someone else's harvest) must keep the
+    // ORIGINAL owner's identity — never reassign the trophy to whoever clicked Save.
+    const owner = editingHarvestId && harvestDetailData ? harvestDetailData : userProfile;
+
     const payload = {
       species, notes, weight, photoURL, weapon,
       deerType, turkeySex, antlerPoints, insideSpread, rackScore,
       beardLength, spurLeft, spurRight, bearColor,
       waterfowlType, smallgameType, quantity,
       harvestDate:      Timestamp.fromDate(new Date(dateVal + "T12:00:00")),
-      memberName:       userProfile.displayName,
-      uid:              userProfile.uid,
-      uploaderColor:    userProfile.color,
-      uploaderInitials: userProfile.initials,
+      memberName:       owner.memberName ?? owner.displayName,
+      uid:              owner.uid,
+      uploaderColor:    owner.uploaderColor ?? owner.color,
+      uploaderInitials: owner.uploaderInitials ?? owner.initials,
       updatedAt:        serverTimestamp()
     };
 
@@ -3476,20 +3692,22 @@ window.deleteHarvest = function (id) {
       const snap = await getDoc(doc(db, "harvests", id));
       const hData = snap.data();
 
-      // Delete harvest
+      // Delete harvest + its photo
       await deleteDoc(doc(db, "harvests", id));
+      await deleteStoredImage(hData?.photoURL);
       expandedHarvests.delete(id);
 
-      // Subtract kill points
-      if (hData && userProfile && !userProfile.isGuest) {
-        const userRef  = doc(db, "users", userProfile.uid);
+      // Subtract kill points from the HARVEST'S OWNER — not whoever clicked delete
+      // (an admin can delete another member's harvest; don't touch the admin's own stats).
+      if (hData?.uid) {
+        const userRef  = doc(db, "users", hData.uid);
         const userSnap = await getDoc(userRef);
         const userData = userSnap.data() || {};
         let pts = computeKillPoints(hData);
         const newPts   = Math.max(0, (userData.killPoints  || 0) - pts);
         const newKills = Math.max(0, (userData.totalKills  || 0) - 1);
         await updateDoc(userRef, { killPoints: newPts, totalKills: newKills });
-        updateKillCounter();
+        if (hData.uid === userProfile?.uid) updateKillCounter();
       }
 
       // Delete the ONE auto feed post tied to this harvest (older posts written
@@ -3565,29 +3783,11 @@ function compressImage(file, maxWidth = 1600, maxHeight = 1600, quality = 0.82) 
 // ── Render Harvest List ──────────────────────────────────────
 
 // ============================================================
-// TRAIL CAM — Collapsible rows, tagging, filtering (Step 5 v2)
+// TRAIL CAM — Collapsible album rows + lightbox
 // ============================================================
-
-const TC_ANIMALS = [
-  { id: "deer",         label: "Deer",            icon: "🦌" },
-  { id: "turkey",       label: "Turkey",           icon: "🦃" },
-  { id: "bear",         label: "Bear",             icon: "🐻" },
-  { id: "coyote",       label: "Coyote",           icon: "🐺" },
-  { id: "wolf",         label: "Wolf",             icon: "🐺" },
-  { id: "fox",          label: "Fox",              icon: "🦊" },
-  { id: "bobcat",       label: "Bobcat",           icon: "🐆" },
-  { id: "mountainlion", label: "Mountain Lion",    icon: "🐆" },
-  { id: "furbearing",   label: "Fur-Bearing",      icon: "🦦" },
-  { id: "bird",         label: "Bird",             icon: "🐦" },
-  { id: "waterfowl",    label: "Waterfowl",        icon: "🦆" },
-  { id: "smallgame",    label: "Small Game",       icon: "🐿️" },
-  { id: "nocturnal",    label: "Nocturnal Mammal", icon: "🐀" },
-  { id: "swampgas",     label: "Swamp Gas",        icon: "🤢" }
-];
 
 let trailCamUnsub  = null;
 let trailCamDetail = null;
-let tcActiveAnimals = [];
 let tcExpandedRows  = new Set();
 
 // ── Navigate ─────────────────────────────────────────────────
@@ -3602,18 +3802,12 @@ window.goTrailCam = function () {
   const style = document.createElement("style");
   style.id = "tc-styles";
   style.textContent = `
-    .tc-filter-btn { flex-shrink:0;background:rgba(255,255,255,0.06);border:1px solid var(--card-border);color:var(--text-muted);border-radius:20px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;font-family:var(--font-sans);white-space:nowrap; }
-    .tc-filter-btn.active { background:linear-gradient(135deg,var(--orange),var(--orange-bright));border-color:transparent;color:#fff; }
-    .tc-filter-btn:hover:not(.active) { border-color:var(--gold-dim);color:var(--gold); }
     .tc-row-header { display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--forest-card);border:1px solid var(--card-border);border-radius:var(--radius-lg);cursor:pointer;transition:border-color 0.2s,background 0.2s;width:100%;text-align:left;font-family:var(--font-sans);margin-bottom:8px; }
     .tc-row-header:hover { border-color:var(--gold-dim); }
     .tc-row-header.expanded { border-color:var(--gold-dim);border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0; }
     .tc-carousel { display:flex;gap:10px;padding:10px 12px 12px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;background:rgba(14,10,4,0.9);border:1px solid var(--gold-dim);border-top:none;border-bottom-left-radius:var(--radius-lg);border-bottom-right-radius:var(--radius-lg);margin-bottom:10px; }
     .tc-card { flex:0 0 150px;scroll-snap-align:start;cursor:pointer;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--card-border);background:var(--forest-card);transition:transform 0.2s,border-color 0.2s; }
     .tc-card:hover { transform:scale(1.03);border-color:var(--gold-dim); }
-    .tc-tag-pill { display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.08);border:1px solid var(--card-border);border-radius:20px;padding:3px 9px;font-size:11px;color:var(--text-muted);cursor:pointer;transition:all 0.2s;font-family:var(--font-sans); }
-    .tc-tag-pill.tagged { background:rgba(196,169,106,0.15);border-color:var(--gold-dim);color:var(--gold); }
-    .tc-tag-pill:hover:not(.tagged) { border-color:var(--gold-dim);color:var(--text-warm); }
   `;
   document.head.appendChild(style);
 })();
@@ -3622,18 +3816,7 @@ window.goTrailCam = function () {
 window.renderTrailCamScreen = function () {
   const content = document.getElementById("trailcam-content");
   content.innerHTML = `
-    <div style="padding:12px 16px 8px;display:flex;align-items:center;gap:10px">
-      <button class="btn btn-secondary" onclick="openTcFilterModal()"
-        style="display:flex;align-items:center;gap:7px;flex:1">
-        🔍 Filter Photos
-        <span id="tc-filter-badge" class="hidden"
-          style="background:var(--orange);color:#fff;font-size:10px;font-weight:700;
-                 padding:2px 7px;border-radius:10px;margin-left:auto"></span>
-      </button>
-      <button id="tc-clear-filter-btn" class="btn btn-ghost btn-sm hidden"
-        onclick="clearTcFilters()" style="color:var(--danger);font-size:12px">Clear</button>
-    </div>
-    <div class="fade-divider-plain"></div>
+    <div style="padding:14px 16px 4px"></div>
     <div id="trailcam-feed" style="padding:0 16px 80px">
       <div style="text-align:center;padding:40px;color:var(--text-muted)">
         <div class="spinner" style="margin:0 auto 12px"></div>Loading photos…
@@ -3641,57 +3824,6 @@ window.renderTrailCamScreen = function () {
     </div>
   `;
   loadTrailCamFeed();
-};
-
-// ── Filter modal ─────────────────────────────────────────────
-window.openTcFilterModal = function () {
-  const ov = document.createElement("div");
-  ov.className = "modal-overlay"; ov.id = "tc-filter-overlay";
-  ov.innerHTML = `
-    <div class="modal-box" style="max-width:370px;max-height:85vh;overflow-y:auto">
-      <div class="modal-title">🔍 Filter Trail Cam</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Select animals — photos must have ALL selected tags.</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
-        ${TC_ANIMALS.map(a => `
-          <button class="tc-filter-pill ${tcActiveAnimals.includes(a.id) ? "active" : ""}"
-            data-id="${a.id}" onclick="toggleTcFilterPill(this,'${a.id}')">
-            ${a.icon} ${a.label}</button>`).join("")}
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary btn-sm" onclick="closeTcFilterModal()">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="applyTcFilters()">Apply</button>
-      </div>
-    </div>`;
-  if (!document.getElementById("tc-pill-styles")) {
-    const s = document.createElement("style"); s.id = "tc-pill-styles";
-    s.textContent = `.tc-filter-pill{background:rgba(255,255,255,0.06);border:1px solid var(--card-border);color:var(--text-muted);border-radius:20px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;font-family:var(--font-sans)}.tc-filter-pill.active{background:linear-gradient(135deg,var(--orange),var(--orange-bright));border-color:transparent;color:#fff}`;
-    document.head.appendChild(s);
-  }
-  document.body.appendChild(ov);
-};
-window.closeTcFilterModal = function () { document.getElementById("tc-filter-overlay")?.remove(); };
-window.toggleTcFilterPill = function (btn, id) {
-  if (tcActiveAnimals.includes(id)) { tcActiveAnimals = tcActiveAnimals.filter(a => a !== id); btn.classList.remove("active"); }
-  else { tcActiveAnimals.push(id); btn.classList.add("active"); }
-};
-window.applyTcFilters = function () {
-  closeTcFilterModal();
-  const badge = document.getElementById("tc-filter-badge");
-  const clrBtn = document.getElementById("tc-clear-filter-btn");
-  if (tcActiveAnimals.length > 0) {
-    if (badge) { badge.textContent = tcActiveAnimals.length + " active"; badge.classList.remove("hidden"); }
-    if (clrBtn) clrBtn.classList.remove("hidden");
-  } else {
-    if (badge) badge.classList.add("hidden");
-    if (clrBtn) clrBtn.classList.add("hidden");
-  }
-  renderTcFeed(window._tcLastSnap);
-};
-window.clearTcFilters = function () {
-  tcActiveAnimals = [];
-  document.getElementById("tc-filter-badge")?.classList.add("hidden");
-  document.getElementById("tc-clear-filter-btn")?.classList.add("hidden");
-  renderTcFeed(window._tcLastSnap);
 };
 
 // ── Load Feed ────────────────────────────────────────────────
@@ -3713,15 +3845,9 @@ function loadTrailCamFeed() {
 function renderTcFeed(snap) {
   const feed = document.getElementById("trailcam-feed");
   if (!feed || !snap) return;
-  let docs = snap.docs;
-  if (tcActiveAnimals.length > 0) {
-    docs = docs.filter(d => {
-      const tags = d.data().animalTags || [];
-      return tcActiveAnimals.every(a => tags.includes(a));
-    });
-  }
+  const docs = snap.docs;
   if (docs.length === 0) {
-    feed.innerHTML = `<div style="text-align:center;padding:60px 24px;color:var(--text-muted)"><div style="font-size:48px;margin-bottom:14px">📷</div><div>${tcActiveAnimals.length > 0 ? "No photos match your filters." : "No photos yet — tap + to upload"}</div></div>`;
+    feed.innerHTML = `<div style="text-align:center;padding:60px 24px;color:var(--text-muted)"><div style="font-size:48px;margin-bottom:14px">📷</div><div>No photos yet — tap + to upload</div></div>`;
     return;
   }
   const grouped = {}; const order = [];
@@ -3742,11 +3868,6 @@ function renderTcFeed(snap) {
   feed.innerHTML = sortedKeys.map(key => {
     const group = grouped[key];
     const isExp = tcExpandedRows.has(key);
-    const tagSet = new Set(group.photos.flatMap(p => p.animalTags||[]));
-    const tagArr = [...tagSet].map(t => TC_ANIMALS.find(x => x.id===t)).filter(Boolean);
-    const tagIcons = tagArr.slice(0,4).map(a=>a.icon).join(" ");
-    const tagExtra = tagArr.length > 4 ? ` +${tagArr.length-4}` : "";
-    const tagPills = tagArr.length > 0 ? `<span style="font-size:12px;color:var(--text-muted)">${tagIcons}${tagExtra}</span>` : "";
     return `<div style="margin-bottom:${isExp?"0":"10px"}">
       <button class="tc-row-header ${isExp?"expanded":""}" onclick="toggleTcRow('${key}')">
         <div class="avatar" style="background:${safeColor(group.color)};width:34px;height:34px;font-size:12px;flex-shrink:0">${esc(group.initials)}</div>
@@ -3754,7 +3875,6 @@ function renderTcFeed(snap) {
           <div style="font-size:14px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(group.label)}</div>
           <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap">
             <span style="font-size:11px;color:var(--text-dim)">${group.photos.length} photo${group.photos.length!==1?"s":""}</span>
-            ${tagPills}
           </div>
         </div>
         <span style="color:var(--gold);font-size:18px;flex-shrink:0;transition:transform 0.2s;${isExp?"transform:rotate(90deg)":""}">›</span>
@@ -3771,7 +3891,6 @@ window.toggleTcRow = function (key) {
 };
 
 function tcCard(tc) {
-  const tags = (tc.animalTags||[]).map(t => TC_ANIMALS.find(x=>x.id===t)?.icon||"").join("");
   return `<div class="tc-card" onclick="openTcLightbox('${tc.id}')">
     <img src="${esc(tc.photoURL || "")}" style="width:150px;height:180px;object-fit:cover;display:block" />
     <div style="padding:7px 9px">
@@ -3779,7 +3898,6 @@ function tcCard(tc) {
         <div class="avatar" style="background:${safeColor(tc.uploaderColor)};width:20px;height:20px;font-size:9px;flex-shrink:0">${esc(tc.uploaderInitials||"?")}</div>
         <div style="font-size:11px;font-weight:600;color:var(--text-warm);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1">${esc(tc.uploaderName||"Unknown")}</div>
       </div>
-      ${tags?`<div style="font-size:13px;margin-top:2px">${tags}</div>`:""}
       ${tc.caption?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(tc.caption)}</div>`:""}
     </div>
   </div>`;
@@ -3812,7 +3930,6 @@ function renderTcLightboxBody(tc) {
   const dateStr = formatDate(tc.capturedAt);
   const isOwner = userProfile && (userProfile.uid===tc.uid || userProfile.role==="admin");
   const reactions = tc.reactions||{};
-  const tags = tc.animalTags||[];
   const body = document.getElementById("tc-lb-body");
   if (!body) return;
   body.innerHTML = `
@@ -3823,16 +3940,12 @@ function renderTcLightboxBody(tc) {
         <div><div style="font-weight:600;font-size:14px">${esc(tc.uploaderName||"Unknown")}</div><div style="font-size:12px;color:var(--text-muted)">${dateStr}</div></div>
       </div>
       ${tc.caption?`<div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:12px;white-space:pre-wrap;word-break:break-word">${esc(tc.caption)}</div>`:""}
-      <div style="margin-bottom:14px">
-        <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Tag Animals in Photo</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px" id="tc-tag-list">${renderTcTagPills(tags,id)}</div>
-      </div>
       <div class="fade-divider-plain" style="margin:0 0 12px"></div>
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px" id="tc-lb-reactions">${renderReactionBadges(reactions,id,"trailcam")}</div>
-      ${userProfile&&!userProfile.isGuest?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${REACTIONS_LIST.map(e=>`<button onclick="addTcReaction('${id}','${e}')" style="background:rgba(255,255,255,0.07);border:1px solid var(--card-border);border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;transition:all 0.2s;font-family:var(--font-sans)">${e}</button>`).join("")}</div>`:""}
+      ${userProfile?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${REACTIONS_LIST.map(e=>`<button onclick="addTcReaction('${id}','${e}')" style="background:rgba(255,255,255,0.07);border:1px solid var(--card-border);border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;transition:all 0.2s;font-family:var(--font-sans)">${e}</button>`).join("")}</div>`:""}
       <div class="fade-divider-plain" style="margin:0 0 12px"></div>
       <div id="tc-lb-comments">${renderComments(tc.comments||[],id,"trailcam")}</div>
-      ${userProfile&&!userProfile.isGuest?`<div style="display:flex;gap:8px;margin-top:12px"><input type="text" id="tc-lb-comment-input" placeholder="Add a comment…" style="flex:1" onkeydown="if(event.key==='Enter')submitTcComment('${id}')" /><button class="btn btn-primary btn-sm" onclick="submitTcComment('${id}')">Post</button></div>`:""}
+      ${userProfile?`<div style="display:flex;gap:8px;margin-top:12px"><input type="text" id="tc-lb-comment-input" placeholder="Add a comment…" style="flex:1" onkeydown="if(event.key==='Enter')submitTcComment('${id}')" /><button class="btn btn-primary btn-sm" onclick="submitTcComment('${id}')">Post</button></div>`:""}
       ${isOwner?`<div style="margin-top:14px"><button class="btn btn-danger btn-full btn-sm" onclick="deleteTcPhoto('${id}')">🗑 Delete Photo</button></div>`:""}
       <div style="height:32px"></div>
     </div>`;
@@ -3844,32 +3957,6 @@ window.closeTcLightbox = function () {
   trailCamDetail = null;
 };
 
-function renderTcTagPills(tags, id) {
-  const tagged = new Set(tags || []);
-  return TC_ANIMALS.map(a => `
-    <button class="tc-tag-pill ${tagged.has(a.id) ? "tagged" : ""}"
-      onclick="toggleTcTag('${id}','${a.id}')">
-      ${a.icon} ${a.label}
-    </button>`).join("");
-}
-
-window.toggleTcTag = async function (id, animalId) {
-  if (!userProfile || userProfile.isGuest) { showToast("Sign in to tag photos.", "error"); return; }
-  try {
-    const ref2 = doc(db, "trailcam", id);
-    const snap = await getDoc(ref2);
-    if (!snap.exists()) return;
-    const tags = new Set(snap.data().animalTags || []);
-    if (tags.has(animalId)) tags.delete(animalId);
-    else tags.add(animalId);
-    const newTags = [...tags];
-    await updateDoc(ref2, { animalTags: newTags });
-    if (trailCamDetail && trailCamDetail.id === id) trailCamDetail.animalTags = newTags;
-    const list = document.getElementById("tc-tag-list");
-    if (list) list.innerHTML = renderTcTagPills(newTags, id);
-  } catch (err) { console.error(err); showToast("Could not update tags.", "error"); }
-};
-
 window.addTcReaction = async function (id, emoji) {
   await addReaction(id, "trailcam", emoji);
   const snap = await getDoc(doc(db, "trailcam", id));
@@ -3878,7 +3965,7 @@ window.addTcReaction = async function (id, emoji) {
 };
 
 window.submitTcComment = async function (id) {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   const input = document.getElementById("tc-lb-comment-input");
   const text  = input?.value.trim();
   if (!text) return;
@@ -3903,7 +3990,10 @@ window.submitTcComment = async function (id) {
 window.deleteTcPhoto = function (id) {
   appConfirm("Delete Photo", "Permanently delete this trail cam photo?", async () => {
     try {
+      const photoURL = (trailCamDetail && trailCamDetail.id === id ? trailCamDetail.photoURL : null)
+        || (await getDoc(doc(db, "trailcam", id))).data()?.photoURL;
       await deleteDoc(doc(db, "trailcam", id));
+      await deleteStoredImage(photoURL);
       closeTcLightbox();
       showToast("Photo deleted.", "success");
     } catch (err) { console.error(err); showToast("Could not delete.", "error"); }
@@ -4207,10 +4297,6 @@ function renderCmpPhotoCarousel() {
                   scrollbar-width:none;-ms-overflow-style:none">
         ${album.docs.map(tc => {
           const isSelected = _cmpSelectedPhoto === tc.id;
-          const tags = (tc.animalTags||[]).map(t => {
-            const a = (typeof TC_ANIMALS !== "undefined" ? TC_ANIMALS : []).find(x => x.id === t);
-            return a ? a.icon : "";
-          }).join("");
           return `
             <div onclick="selectCmpPhoto('${tc.id}')"
               style="flex-shrink:0;width:120px;scroll-snap-align:start;cursor:pointer;
@@ -4219,8 +4305,6 @@ function renderCmpPhotoCarousel() {
                      transition:border-color 0.15s">
               <img src="${esc(tc.photoURL || "")}"
                 style="width:120px;height:120px;object-fit:cover;display:block" />
-              ${tags ? `<div style="position:absolute;bottom:3px;left:4px;font-size:13px;
-                                    text-shadow:0 1px 3px rgba(0,0,0,0.8)">${tags}</div>` : ""}
               ${isSelected ? `<div style="position:absolute;top:4px;right:4px;
                 background:var(--orange);border-radius:50%;width:22px;height:22px;
                 display:flex;align-items:center;justify-content:center;
@@ -4282,7 +4366,6 @@ async function archiveOldFeedPosts() {
 
 window.openAddTrailCam = async function () {
   if (!userProfile) { showToast("Sign in to upload photos.", "error"); return; }
-  if (userProfile.isGuest) { showToast("Guests cannot upload photos.", "error"); return; }
 
   let albums = [];
   try {
@@ -4569,7 +4652,6 @@ window.saveTcPhotos = async function () {
         uploaderInitials: userProfile.initials,
         uploaderColor:    userProfile.color,
         createdAt:        serverTimestamp(),
-        animalTags:       [],
         reactions:        {},
         comments:         []
       });
@@ -4775,63 +4857,50 @@ async function loadCalendarMonth(year, month) {
   }
 }
 
-function renderCalendarGrid(el) {
-  const MONTHS = ["January","February","March","April","May","June",
-                  "July","August","September","October","November","December"];
-  const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const CAL_MONTHS = ["January","February","March","April","May","June",
+                    "July","August","September","October","November","December"];
+const CAL_DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
-  const year  = calCurrentYear;
-  const month = calCurrentMonth;
+// A day cell reads instinctively: your days get a gold ring, any day with
+// activity gets a plain red dot — nothing fancier to parse at a glance.
+function monthDayCell(dateStr, d, isToday, size) {
+  const dayVisits = visitsOnDay(dateStr);
+  const hasActivity = dayVisits.length > 0;
+  const mineHere  = userProfile && dayVisits.some(v => v.uid === userProfile.uid);
+  const border    = mineHere ? "var(--gold)" : isToday ? "var(--gold-dim)" : "rgba(237,226,200,0.10)";
+  const baseBg    = isToday ? "rgba(196,169,106,0.10)" : "rgba(237,226,200,0.06)";
+  const dotSize   = size === "sm" ? 5 : 6;
+  return `
+    <div onclick="openCalendarDay('${dateStr}')"
+      style="position:relative;aspect-ratio:1;border-radius:var(--radius-md);cursor:pointer;
+             background:${baseBg};border:1px solid ${border};min-height:${size === "sm" ? 32 : 44}px;
+             display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px"
+      onmouseover="this.style.borderColor='var(--gold)'"
+      onmouseout="this.style.borderColor='${border}'">
+      <div style="font-size:${size === "sm" ? 12 : 13}px;font-weight:${isToday ? "700" : "400"};
+                  color:${isToday ? "var(--gold)" : "var(--text-warm)"}">${d}</div>
+      <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;
+                  background:${hasActivity ? "#ef4444" : "transparent"};
+                  box-shadow:${hasActivity ? "0 0 5px rgba(239,68,68,0.8)" : "none"}"></div>
+    </div>`;
+}
+
+function monthGridCellsHTML(year, month, size) {
   const today = new Date();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const prevDays = new Date(year, month, 0).getDate();
-
-  // Build grid cells
   let cells = "";
-
-  // Previous month padding
   for (let i = firstDay - 1; i >= 0; i--) {
     cells += `<div style="aspect-ratio:1;padding:4px;opacity:0.25">
       <div style="font-size:12px;color:var(--text-dim);text-align:right">${prevDays - i}</div>
     </div>`;
   }
-
-  // Off-cream fill for ordinary days; today keeps its accent.
-  const DAY_BG = "rgba(237,226,200,0.06)";
-
-  // Current month days — an occupancy gauge: the cell fills from the bottom and
-  // prints a headcount. Busier day = taller, slightly deeper fill.
   for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr    = year + "-" + String(month+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
-    const dayVisits  = visitsOnDay(dateStr);
-    const count      = new Set(dayVisits.map(v => v.uid)).size;
-    const isToday    = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-    const mineHere   = userProfile && dayVisits.some(v => v.uid === userProfile.uid);
-
-    const ramp   = count ? Math.min(1, (count - 1) / 7) : 0;   // 1 person … 8+ = full
-    const fillH  = count ? Math.round(20 + ramp * 72) : 0;      // % of cell height
-    const fillA  = (0.15 + ramp * 0.27).toFixed(2);             // fill opacity
-    const border = mineHere ? "var(--gold)" : isToday ? "var(--gold-dim)" : "rgba(237,226,200,0.10)";
-    const baseBg = isToday ? "rgba(196,169,106,0.10)" : DAY_BG;
-
-    cells += `
-      <div onclick="openCalendarDay('${dateStr}')"
-        style="position:relative;overflow:hidden;aspect-ratio:1;border-radius:var(--radius-md);
-               cursor:pointer;background:${baseBg};border:1px solid ${border};min-height:44px"
-        onmouseover="this.style.borderColor='var(--gold)'"
-        onmouseout="this.style.borderColor='${border}'">
-        ${fillH ? `<div style="position:absolute;left:0;right:0;bottom:0;height:${fillH}%;
-                     background:rgba(212,98,42,${fillA})"></div>` : ""}
-        <div style="position:absolute;top:3px;right:5px;font-size:13px;
-                    font-weight:${isToday ? "700" : "400"};
-                    color:${isToday ? "var(--gold)" : "var(--text-warm)"}">${d}</div>
-        ${count ? `<div style="position:absolute;left:5px;bottom:2px;font-size:12px;font-weight:700;
-                     color:var(--text-warm);font-variant-numeric:tabular-nums">${count}</div>` : ""}
-      </div>`;
+    const dateStr = year + "-" + String(month+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
+    const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+    cells += monthDayCell(dateStr, d, isToday, size);
   }
-
-  // Next month padding
   const totalCells = firstDay + daysInMonth;
   const remaining  = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
   for (let i = 1; i <= remaining; i++) {
@@ -4839,6 +4908,24 @@ function renderCalendarGrid(el) {
       <div style="font-size:12px;color:var(--text-dim);text-align:right">${i}</div>
     </div>`;
   }
+  return cells;
+}
+
+// Re-render every calendar surface that's currently on screen (home mini
+// calendar and/or the full Calendar screen share the same month state).
+async function refreshAllCalendarViews() {
+  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
+  const full = document.getElementById("calendar-content");
+  if (full) renderCalendarGrid(full);
+  const home = document.getElementById("home-calendar-wrap");
+  if (home) renderHomeCalendarCard(home);
+}
+
+function renderCalendarGrid(el) {
+  const MONTHS = CAL_MONTHS, DAYS = CAL_DAYS;
+  const year  = calCurrentYear;
+  const month = calCurrentMonth;
+  const cells = monthGridCellsHTML(year, month, "lg");
 
   el.innerHTML = `
     <div style="padding:0 0 80px">
@@ -4931,19 +5018,13 @@ function renderCalendarGrid(el) {
 window.calPrevMonth = async function () {
   calCurrentMonth--;
   if (calCurrentMonth < 0) { calCurrentMonth = 11; calCurrentYear--; }
-  const el = document.getElementById("calendar-content");
-  if (el) { el.innerHTML = '<div style="padding:32px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>'; }
-  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
-  if (el) renderCalendarGrid(el);
+  await refreshAllCalendarViews();
 };
 
 window.calNextMonth = async function () {
   calCurrentMonth++;
   if (calCurrentMonth > 11) { calCurrentMonth = 0; calCurrentYear++; }
-  const el = document.getElementById("calendar-content");
-  if (el) { el.innerHTML = '<div style="padding:32px;text-align:center"><div class="spinner" style="margin:0 auto"></div></div>'; }
-  await loadCalendarMonth(calCurrentYear, calCurrentMonth);
-  if (el) renderCalendarGrid(el);
+  await refreshAllCalendarViews();
 };
 
 window.openCalendarDay = function (dateStr) {
@@ -5069,7 +5150,7 @@ window.openCalendarDay = function (dateStr) {
           ? `<div style="text-align:center;padding:14px 0 18px;color:var(--text-muted)">
                <div style="font-size:30px;margin-bottom:6px">🪵</div>
                <div style="font-size:13px">Nobody's down for this day yet.</div>
-               ${!userProfile?.isGuest ? `<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Be the first — add yourself below.</div>` : ""}
+               ${userProfile ? `<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Be the first — add yourself below.</div>` : ""}
              </div>`
           : `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
                ${isPast ? "Who was there" : "Who's coming"}
@@ -5077,7 +5158,7 @@ window.openCalendarDay = function (dateStr) {
 
         <div id="cal-day-context" style="margin-top:6px"></div>
 
-        ${!userProfile?.isGuest ? `
+        ${userProfile ? `
           <div style="margin-top:16px;border-top:1px solid var(--gold-dim);padding-top:14px">
             <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
               ${myVisits.length ? "Log another" : "Add yourself to this day"}
@@ -5151,7 +5232,7 @@ window.openAddCalendarVisit = function () {
 };
 
 window.saveCalendarVisit = async function (dateStr) {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   const notes    = document.getElementById("cal-visit-notes")?.value.trim() || "";
   const purpose  = document.querySelector('#cal-day-overlay button.cal-chip-on[data-purpose]')?.dataset.purpose || null;
   const dayPart  = document.querySelector('#cal-day-overlay button.cal-chip-on[data-daypart]')?.dataset.daypart || null;
@@ -5176,10 +5257,7 @@ window.saveCalendarVisit = async function (dateStr) {
         : purpose ? `${VISIT_PURPOSES[purpose].icon} You're on the calendar!` : "You're on the calendar!",
       "success"
     );
-    // Refresh
-    await loadCalendarMonth(calCurrentYear, calCurrentMonth);
-    const el = document.getElementById("calendar-content");
-    if (el) renderCalendarGrid(el);
+    await refreshAllCalendarViews();
   } catch(err) {
     console.error(err);
     showToast("Could not save visit.", "error");
@@ -5192,9 +5270,7 @@ window.deleteCalendarVisit = function (id) {
     try {
       await deleteDoc(doc(db, "visits", id));
       showToast("Visit removed.", "success");
-      await loadCalendarMonth(calCurrentYear, calCurrentMonth);
-      const el = document.getElementById("calendar-content");
-      if (el) renderCalendarGrid(el);
+      await refreshAllCalendarViews();
       const still = document.getElementById("cal-day-overlay");
       if (still && reopenDate) { still.remove(); openCalendarDay(reopenDate); }
     } catch(err) { console.error(err); showToast("Could not remove.", "error"); }
@@ -5244,7 +5320,7 @@ function getNextTier(pts) {
 }
 
 async function updateKillCounter() {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   try {
     const snap = await getDoc(doc(db, "users", userProfile.uid));
     const data = snap.data() || {};
@@ -5261,7 +5337,7 @@ async function updateKillCounter() {
 }
 
 async function recordKill(harvestData) {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   try {
     const ref2  = doc(db, "users", userProfile.uid);
     const snap  = await getDoc(ref2);
@@ -5359,7 +5435,7 @@ const CHECKIN_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
 window.renderCheckinButton = async function () {
   const wrap = document.getElementById("home-checkin-wrap");
   if (!wrap) return;
-  if (!userProfile || userProfile.isGuest) { wrap.innerHTML = ""; return; }
+  if (!userProfile) { wrap.innerHTML = ""; return; }
 
   try {
     const snap     = await getDoc(doc(db, "users", userProfile.uid));
@@ -5413,7 +5489,7 @@ window.renderCheckinButton = async function () {
 };
 
 window.doCheckin = async function () {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   try {
     const now = serverTimestamp();
     const today = new Date().toISOString().split("T")[0];
@@ -5475,6 +5551,7 @@ async function postAutoFeedEvent(type, data) {
       type,
       data,
       isAuto:     true,
+      uid:        (data && data.uid) || userProfile?.uid || null,   // who triggered it
       createdAt:  serverTimestamp(),
       reactions:  {},
       comments:   []
@@ -5491,7 +5568,7 @@ window.renderFeedScreen = function () {
   const content = document.getElementById("feed-content");
   content.innerHTML = `
     <!-- Compose bar -->
-    ${userProfile && !userProfile.isGuest ? `
+    ${userProfile ? `
       <div style="padding:12px 16px;border-bottom:1px solid var(--gold-dim)">
         <div style="display:flex;gap:10px;align-items:center">
           <div class="avatar" style="background:${safeColor(userProfile.color)};
@@ -5678,7 +5755,7 @@ function feedPostCard(post) {
           id="feed-reactions-${post.id}">
           ${renderReactionBadges(reactions, post.id, "feed")}
         </div>
-        ${userProfile && !userProfile.isGuest ? `
+        ${userProfile ? `
           <button onclick="toggleFeedReactPicker('${post.id}')"
             style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
                    border-radius:20px;padding:4px 10px;font-size:13px;cursor:pointer;
@@ -5695,7 +5772,7 @@ function feedPostCard(post) {
       <!-- Emoji picker — hidden until React tapped -->
       <div id="feed-react-picker-${post.id}" class="hidden"
         style="display:flex;flex-wrap:wrap;gap:5px;padding:6px 0">
-        ${userProfile && !userProfile.isGuest ? REACTIONS_LIST.map(e => `
+        ${userProfile ? REACTIONS_LIST.map(e => `
           <button onclick="addFeedReaction('${post.id}','${e}');toggleFeedReactPicker('${post.id}')"
             style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
                    border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;
@@ -5705,7 +5782,7 @@ function feedPostCard(post) {
       <div id="feed-comments-${post.id}" class="${feedExpandedComments.has(post.id) ? "" : "hidden"}">
         <div class="fade-divider-plain" style="margin:0 0 10px"></div>
         ${renderComments(comments, post.id, "feed")}
-        ${userProfile && !userProfile.isGuest ? `
+        ${userProfile ? `
           <div style="display:flex;gap:8px;margin-top:10px">
             <input type="text" id="feed-comment-input-${post.id}"
               placeholder="Add a comment…" style="flex:1"
@@ -5740,7 +5817,7 @@ window.addFeedReaction = async function (id, emoji) {
 };
 
 window.submitFeedComment = async function (id) {
-  if (!userProfile || userProfile.isGuest) return;
+  if (!userProfile) return;
   const input = document.getElementById("feed-comment-input-" + id);
   const text  = input?.value.trim();
   if (!text) return;
@@ -5776,7 +5853,9 @@ window.submitFeedComment = async function (id) {
 window.deleteFeedPost = function (id) {
   appConfirm("Delete Post", "Permanently delete this post?", async () => {
     try {
+      const photoURL = (await getDoc(doc(db, "feed", id))).data()?.photoURL;
       await deleteDoc(doc(db, "feed", id));
+      await deleteStoredImage(photoURL);
       showToast("Post deleted.", "success");
     } catch(err) { console.error(err); showToast("Could not delete.", "error"); }
   });
@@ -5784,7 +5863,7 @@ window.deleteFeedPost = function (id) {
 
 // ── Compose ───────────────────────────────────────────────────
 window.openFeedCompose = function () {
-  if (!userProfile || userProfile.isGuest) { showToast("Sign in to post.", "error"); return; }
+  if (!userProfile) { showToast("Sign in to post.", "error"); return; }
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "feed-compose-overlay";
   ov.innerHTML = `
@@ -5883,7 +5962,7 @@ async function loadTrophyData(force) {
   const members = {};
   uSnap.docs.forEach(d => {
     const u = d.data();
-    if (!u.isGuest && u.displayName) {
+    if (u.displayName) {
       members[d.id] = { uid: d.id, name: u.displayName, initials: u.initials || "?", color: u.color || "#556B2F" };
     }
   });
@@ -6136,7 +6215,7 @@ function pointsReferenceHTML(pts) {
 window.renderTrophyRoom = async function () {
   const content = document.getElementById("mykills-content");
   if (!content) return;
-  if (!userProfile || userProfile.isGuest) {
+  if (!userProfile) {
     content.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">Sign in to see your Trophy Room.</div>`;
     return;
   }

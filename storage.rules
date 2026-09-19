@@ -1,0 +1,39 @@
+rules_version = '2';
+
+// Tucker's Camp Lite — Storage rules
+// Every upload embeds the uploader's uid as the filename's prefix
+// ("<uid>_<timestamp>...", see app.js uploadBytes calls), so a delete can be
+// checked against the actual uploader without extra metadata.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn() &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function ownsFile(name) {
+      return signedIn() && name.matches(request.auth.uid + '_.*');
+    }
+
+    // Read/upload — any signed-in member, image files under 25 MB.
+    match /{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+                   && request.resource.size < 25 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Delete — only the uploader (by filename prefix) or an admin.
+    match /feed/{file} {
+      allow delete: if ownsFile(file) || isAdmin();
+    }
+    match /harvests/{date}/{file} {
+      allow delete: if ownsFile(file) || isAdmin();
+    }
+    match /trailcam/{date}/{file} {
+      allow delete: if ownsFile(file) || isAdmin();
+    }
+  }
+}
