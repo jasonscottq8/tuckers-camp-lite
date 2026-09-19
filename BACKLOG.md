@@ -322,6 +322,34 @@ Verified via repeated `window.__debugSetUser`/`__debugEnterApp`/
 `__debugFeedCards`/`__debugNotif` hook + screenshot rounds at both desktop and
 375px mobile width (all debug hooks removed before finishing, each time).
 
+### Feed polish — SHIPPED in lite-2.19.1
+
+Three small follow-ups from the user's first look at the 2.19.0 chat bubbles.
+1. **Floating + button removed from Feed** — `screen-feed` dropped from the
+   `fabScreens` list in `showScreen()` (harvest/trailcam/calendar keep it); the
+   now-unreachable `openAddPost()` and its `fabAction()` switch case were
+   deleted (the inline compose bar at the top of Feed already covers the
+   same job).
+2. **Faint dividers between messages** — new `FEED_DIVIDER` constant (reuses
+   the existing `.fade-divider-plain` gold-fade line) joins the cards in both
+   `loadFeed()`'s and `loadMoreFeed()`'s render, instead of concatenating them
+   with no separator — asked for specifically to keep short one-word
+   back-and-forth replies ("Hey" / "Yo" / "Yep") from visually running
+   together into one blob of bubbles.
+3. **"Photos/Trail Cam" label** — the Quick Action button text changed first
+   (user request), then the Trail Cam screen's own back-bar title
+   (`index.html` `#screen-trailcam .section-title`) was updated to match after
+   the user noticed the in-screen header still said just "Trail Cam." Other
+   incidental "Trail Cam" mentions (the photo lightbox title, the Compare
+   screen, admin stat labels) were deliberately left alone — out of scope,
+   not asked for.
+4. **Own-message alignment confirmed by code inspection** (user couldn't
+   multi-device test live yet): `isMine = userProfile.uid === post.uid` is
+   evaluated per-viewer against their OWN session, against the post's stored
+   author `uid` — so on any member's device, their own messages render
+   right-aligned and everyone else's render left-aligned, symmetrically. No
+   change needed, just confirmed via a two-sender fixture in the sandbox.
+
 ### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 
 Built: `renderTrophyRoom` (stat-card feed, camp rankings, by-year bars, award

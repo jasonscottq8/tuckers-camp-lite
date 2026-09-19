@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.19.0";
+const APP_VERSION = "lite-2.19.1";
 
 
 
@@ -660,7 +660,7 @@ window.showScreen = function (screenId) {
   currentScreen = screenId;
 
   // FAB visibility
-  const fabScreens = ["screen-harvest", "screen-trailcam", "screen-feed", "screen-calendar"];
+  const fabScreens = ["screen-harvest", "screen-trailcam", "screen-calendar"];
   const fab = document.getElementById("fab-btn");
   if (fab) fab.classList.toggle("hidden", !fabScreens.includes(screenId));
 
@@ -725,14 +725,12 @@ window.fabAction = function () {
   switch (currentScreen) {
     case "screen-harvest":  openAddHarvest();  break;
     case "screen-trailcam": openAddTrailCam(); break;
-    case "screen-feed":     openAddPost();     break;
     case "screen-calendar": openAddVisit(); break;
   }
 };
 
 // Stubs — filled in as steps complete
 // openAddTrailCam defined in Trail Cam module below
-function openAddPost()     { expandFeedComposer(); document.getElementById("feed-compose-wrap")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
 function openAddVisit()    { openAddCalendarVisit(); }
 
 // ============================================================
@@ -1570,6 +1568,11 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.19.1", date: "Sep 2026", notes: [
+      "Removed the floating + button from the Feed — the compose bar at the top covers it",
+      "Added faint dividers between feed messages so short back-and-forth replies don't run together",
+      "The Trail Cam page and its Quick Action button are now both labeled Photos/Trail Cam"
+    ]},
     { version: "lite-2.19.0", date: "Sep 2026", notes: [
       "Feed messages now look like a real chat — colored by who sent them, your own on the right, tap a message to reply",
       "Notification cards are now colored by who they're about, same as their message color, instead of all the same blue",
@@ -6280,6 +6283,11 @@ let feedPageSize = 20;
 let feedLastDoc  = null;
 let feedAllLoaded = false;
 
+// A faint fade between message bubbles — gives short back-and-forth replies
+// (one-word messages especially) some breathing room instead of stacking
+// right on top of each other.
+const FEED_DIVIDER = '<div class="fade-divider-plain" style="margin:4px 28px;opacity:0.55"></div>';
+
 function loadFeed() {
   if (feedUnsub) { feedUnsub(); feedUnsub = null; }
   feedLastDoc   = null;
@@ -6313,7 +6321,7 @@ function loadFeed() {
       return;
     }
 
-    const cards = snap.docs.map(d => feedPostCard({ id: d.id, ...d.data() })).join("");
+    const cards = snap.docs.map(d => feedPostCard({ id: d.id, ...d.data() })).join(FEED_DIVIDER);
     list.innerHTML = cards + (!feedAllLoaded ? `
       <div style="text-align:center;padding:16px">
         <button class="btn btn-secondary btn-sm" onclick="loadMoreFeed()">Load More</button>
@@ -6344,8 +6352,8 @@ window.loadMoreFeed = async function () {
     if (!list) return;
     const loadMoreBtn = list.querySelector("div[style*='text-align:center']");
     if (loadMoreBtn) loadMoreBtn.remove();
-    const newCards = snap.docs.map(d => feedPostCard({ id: d.id, ...d.data() })).join("");
-    list.insertAdjacentHTML("beforeend", newCards);
+    const newCards = snap.docs.map(d => feedPostCard({ id: d.id, ...d.data() })).join(FEED_DIVIDER);
+    list.insertAdjacentHTML("beforeend", newCards ? FEED_DIVIDER + newCards : "");
     if (!feedAllLoaded) {
       list.insertAdjacentHTML("beforeend", `
         <div style="text-align:center;padding:16px">
