@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.18.0";
+const APP_VERSION = "lite-2.19.0";
 
 
 
@@ -149,6 +149,17 @@ function esc(s) {
 // Validate a stored avatar/hex color before dropping it into a style attribute.
 function safeColor(c) {
   return /^#[0-9a-fA-F]{3,8}$/.test(String(c || "")) ? String(c) : "#556B2F";
+}
+
+// A low-opacity tint of a member's avatar color, for backgrounds/borders that
+// should read as "theirs" without fighting the text on top of it.
+function colorTint(c, alpha) {
+  let hex = safeColor(c).slice(1);
+  if (hex.length === 3) hex = hex.split("").map(ch => ch + ch).join("");
+  const r = parseInt(hex.slice(0, 2), 16) || 0;
+  const g = parseInt(hex.slice(2, 4), 16) || 0;
+  const b = parseInt(hex.slice(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 // Best-effort delete of an uploaded image from Storage when its record is
@@ -751,10 +762,7 @@ function notifMergedSorted() {
 function refreshNotifBadge() {
   const unread = notifMergedSorted().filter(i => notifTimeMs(i) > notifLastSeenMs()).length;
   const badge  = document.getElementById("bell-badge");
-  if (badge) {
-    badge.textContent   = unread > 99 ? "99+" : String(unread);
-    badge.style.display = unread > 0 ? "flex" : "none";
-  }
+  if (badge) badge.style.display = unread > 0 ? "block" : "none";   // plain dot, no count — less to read at a glance
   if ("setAppBadge" in navigator) {
     try { unread > 0 ? navigator.setAppBadge(unread) : navigator.clearAppBadge(); } catch (_) {}
   }
@@ -793,43 +801,49 @@ function stopNotifListeners() {
 // arriving while the member is looking at the list doesn't count as unread.
 function notifLastSeenTouch() { localStorage.setItem(NOTIF_SEEN_KEY, String(Date.now())); }
 
-const NOTIF_LINK_BTN_STYLE = "background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:var(--radius-sm);padding:5px 12px;font-size:11px;cursor:pointer;margin-top:8px";
+// Same tinted-pill language as the feed bubbles — colored by the member the
+// notification is about, same as their message color, not by category.
+const NOTIF_LINK_STYLE = "color:var(--gold);text-decoration:underline;cursor:pointer;font-weight:600";
+const NOTIF_DEFAULT_COLOR = "#4a90e2";   // app-level / no specific member to color by
+
+function notifMemberColor(uid) {
+  return (uid && trophyCache?.members?.[uid]?.color) || NOTIF_DEFAULT_COLOR;
+}
 
 function notifCard(item) {
   const dateStr = formatDate(item.createdAt);
-  let icon = "🏕️", body = "New activity at Tucker's Camp", linkBtn = "";
+  let icon = "🏕️", body = "New activity at Tucker's Camp", color = NOTIF_DEFAULT_COLOR, link = "";
 
   if (item.kind === "visit") {
     const p    = visitPurpose(item), dp = visitDayPart(item);
     icon       = (p && p.icon) || "📅";
+    color      = item.visitorColor || notifMemberColor(item.uid);
     const bits = [];
     if (p) bits.push(p.label);
     if (dp && item.dayPart !== "allday") bits.push(dp.label);
-    body    = `📅 <strong>${esc(item.visitorName || "A member")}</strong> is on the calendar for ${esc(visitRangeLabel(item))}${bits.length ? " — " + esc(bits.join(", ")) : ""}`;
-    linkBtn = `<button class="btn btn-sm" onclick="goCalendar()" style="${NOTIF_LINK_BTN_STYLE}">View Calendar</button>`;
+    body = `<strong>${esc(item.visitorName || "A member")}</strong> is on the calendar for ${esc(visitRangeLabel(item))}${bits.length ? " — " + esc(bits.join(", ")) : ""}`;
+    link = `<a onclick="goCalendar()" style="${NOTIF_LINK_STYLE}">View Calendar</a>`;
   } else {
     const tmpl = AUTO_FEED_TYPES[item.type];
-    body = tmpl ? tmpl(item.data || {}) : "New activity at Tucker's Camp";
-    if (item.type === "harvest")  linkBtn = `<button class="btn btn-sm" onclick="goHarvest()" style="${NOTIF_LINK_BTN_STYLE}">View Harvest Log</button>`;
-    if (item.type === "trailcam") linkBtn = `<button class="btn btn-sm" onclick="goTrailCam()" style="${NOTIF_LINK_BTN_STYLE}">View Trail Cam</button>`;
-    if (item.type === "tier")     linkBtn = `<button class="btn btn-sm" onclick="goTo('screen-mykills')" style="${NOTIF_LINK_BTN_STYLE}">View Trophy Room</button>`;
-    if (item.type === "contest")  linkBtn = `<button class="btn btn-sm" onclick="goTo('screen-contests')" style="${NOTIF_LINK_BTN_STYLE}">View Contests</button>`;
+    body  = tmpl ? tmpl(item.data || {}) : "New activity at Tucker's Camp";
+    color = (item.data && item.data.color) || notifMemberColor(item.uid);
+    if (item.type === "harvest")  link = `<a onclick="goHarvest()" style="${NOTIF_LINK_STYLE}">View Harvest Log</a>`;
+    if (item.type === "trailcam") link = `<a onclick="goTrailCam()" style="${NOTIF_LINK_STYLE}">View Trail Cam</a>`;
+    if (item.type === "tier")     link = `<a onclick="goTo('screen-mykills')" style="${NOTIF_LINK_STYLE}">View Trophy Room</a>`;
+    if (item.type === "contest")  link = `<a onclick="goTo('screen-contests')" style="${NOTIF_LINK_STYLE}">View Contests</a>`;
   }
 
   return `
-    <div style="background:rgba(30,80,160,0.25);border:1px solid rgba(80,140,255,0.35);
-                border-radius:var(--radius-lg);padding:10px 14px;margin-bottom:10px;
-                backdrop-filter:blur(4px)">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div style="width:28px;height:28px;border-radius:50%;background:rgba(80,140,255,0.2);
-                    border:1px solid rgba(80,140,255,0.4);display:flex;align-items:center;
-                    justify-content:center;font-size:14px;flex-shrink:0">${icon}</div>
-        <div style="flex:1">
-          <div style="font-size:13px;color:#a0c4ff;line-height:1.4">${body}</div>
-          <div style="font-size:10px;color:rgba(160,196,255,0.6);margin-top:2px">${dateStr}</div>
+    <div style="display:flex;gap:10px;align-items:flex-start;background:${colorTint(color, 0.13)};
+                border:1px solid ${colorTint(color, 0.3)};border-radius:var(--radius-lg);
+                padding:10px 14px;margin-bottom:8px">
+      <span style="font-size:16px;line-height:1.4;flex-shrink:0">${icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--text-warm);line-height:1.45">${body}</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:3px">
+          ${dateStr}${link ? " · " + link : ""}
         </div>
       </div>
-      ${linkBtn}
     </div>`;
 }
 
@@ -861,12 +875,14 @@ function renderNotifList() {
 
 window.notifShowMore = function () { notifShown += 20; renderNotifList(); };
 
-window.openNotifications = function () {
+window.openNotifications = async function () {
   showScreen("screen-notifications");
   notifShown = 20;
   renderNotifList();
   notifLastSeenTouch();
   refreshNotifBadge();
+  await loadTrophyData();     // member colors for notifCard() — re-render once known
+  if (currentScreen === "screen-notifications") renderNotifList();
 };
 
 // ============================================================
@@ -887,10 +903,10 @@ function renderHomeScreen() {
       <div class="section-title">✦ Quick Actions</div>
     </div>
     <div class="action-stack">
-      ${actionBtn("🦌", "Log Harvest",   "goHarvest();openAddHarvest()")}
-      ${actionBtn("💬", "Message Camp",  "goFeed()")}
-      ${actionBtn("📷", "Trail Cam",     "goTrailCam()")}
-      ${actionBtn("🏆", "Trophy Room",   "goTo('screen-mykills')")}
+      ${actionBtn("Log Harvest",   "goHarvest();openAddHarvest()")}
+      ${actionBtn("Message Camp",  "goFeed()")}
+      ${actionBtn("Photos/Trail Cam", "goTrailCam()")}
+      ${actionBtn("Trophy Room",   "goTo('screen-mykills')")}
     </div>
   `;
 
@@ -911,9 +927,8 @@ function renderHomeScreen() {
   `;
 }
 
-function actionBtn(icon, label, action) {
+function actionBtn(label, action) {
   return `<button class="action-btn" onclick="${action}">
-    <span class="action-icon">${icon}</span>
     <span class="action-label">${label}</span>
     <span class="action-chevron">›</span>
   </button>`;
@@ -1555,6 +1570,13 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.19.0", date: "Sep 2026", notes: [
+      "Feed messages now look like a real chat — colored by who sent them, your own on the right, tap a message to reply",
+      "Notification cards are now colored by who they're about, same as their message color, instead of all the same blue",
+      "The bell's unread mark is now just a small dot, not a number",
+      "Quick Actions on the home screen dropped their icons for a cleaner look, and Trail Cam is now labeled Photos/Trail Cam",
+      "Fixed a bug that made the message board fail to load after the last update"
+    ]},
     { version: "lite-2.18.0", date: "Sep 2026", notes: [
       "Message Camp no longer opens a popup window — tap \"What's on your mind?\" and it opens right there in the Feed",
       "The bell now shows a real notification list — harvest logs, trail cam uploads, rank-ups, contest results, and calendar plans, in one place",
@@ -2179,6 +2201,7 @@ window.closeContest = function () {
           standings:      snapshot
         }, { merge: true });
         await postAutoFeedEvent("contest", {
+          uid:          winner.uid || null,   // color the notification by the winner, not whoever closed the season
           winnerName:   winner.name || "A member",
           contestLabel: c.label,
           year:         contestYear(),
@@ -6337,86 +6360,62 @@ function feedPostCard(post) {
   const comments  = post.comments  || [];
   const dateStr   = formatDate(post.createdAt);
   const isOwner   = userProfile && (userProfile.uid === post.uid || userProfile.role === "admin");
+  const isMine    = userProfile && userProfile.uid === post.uid;
+  const tint      = safeColor(post.color);
 
   // Regular user posts (auto-notification posts live in the bell now, not the feed)
-  // Get tier info for flair
-  const posterPts  = post.killPoints || 0;
-  const posterTier = getTierForPoints(posterPts);
-  const tierFlair  = posterTier ? `<span style="font-size:12px;margin-left:4px" title="${posterTier.name}">${posterTier.icon}</span>` : "";
-  const killCount  = post.totalKills ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px">${post.totalKills} kills</span>` : "";
+  const posterTier = getTierForPoints(post.killPoints || 0);
+  const tierFlair   = posterTier ? `<span style="font-size:11px;margin-left:2px" title="${posterTier.name}">${posterTier.icon}</span>` : "";
 
   const commentCount = comments.length;
+  const reactionText = Object.entries(reactions)
+    .filter(([e, users]) => REACTIONS_LIST.includes(e) && Object.keys(users || {}).length > 0)
+    .map(([e, users]) => `<span onclick="addFeedReaction('${post.id}','${e}')" style="cursor:pointer">${e} ${Object.keys(users).length}</span>`)
+    .join(" ");
 
+  // A tap anywhere on the bubble opens/closes the reply thread — no
+  // separate React/Comment buttons to tap around. Avatar sits beside the
+  // bubble the same way it sits beside the composer's own pill.
   return `
-    <div style="background:var(--forest-card);border:1px solid var(--card-border);
-                border-radius:var(--radius-lg);padding:14px;margin-bottom:12px;
-                box-shadow:0 4px 16px rgba(0,0,0,0.3)">
-
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <div class="avatar" style="background:${safeColor(post.color)};
-             width:36px;height:36px;font-size:13px;flex-shrink:0">
+    <div id="feed-post-${post.id}" style="display:flex;justify-content:${isMine ? "flex-end" : "flex-start"};margin-bottom:10px">
+      <div style="max-width:80%;min-width:0;display:flex;${isMine ? "flex-direction:row-reverse" : ""};align-items:flex-end;gap:8px">
+        <div class="avatar" style="background:${tint};width:36px;height:36px;font-size:13px;flex-shrink:0">
           ${esc(post.initials || "?")}</div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px">
-            <span style="font-size:13px;font-weight:600;color:var(--text-warm)">${esc(post.memberName || "Member")}</span>
-            ${tierFlair}${killCount}
+
+        <div style="min-width:0">
+          <div onclick="toggleFeedComments('${post.id}')" style="display:inline-block;max-width:100%;background:${colorTint(tint, 0.16)};border:1px solid ${colorTint(tint, 0.35)};border-radius:var(--radius-xl);padding:10px 16px;font-size:13px;color:var(--text-warm);line-height:1.4;white-space:pre-wrap;word-break:break-word;cursor:pointer">${esc(post.text || "").trim()}</div>
+          ${post.photoURL ? `<img src="${esc(post.photoURL)}"
+            style="max-width:100%;border-radius:12px;margin-top:4px;display:block" />` : ""}
+
+          <div style="display:flex;${isMine ? "flex-direction:row-reverse" : ""};align-items:center;gap:8px;
+                      font-size:10px;color:var(--text-dim);margin-top:3px">
+            ${!isMine ? `<span style="font-weight:600;color:var(--text-warm)">${esc(post.memberName || "Member")}${tierFlair} ·</span>` : ""}
+            <span>${dateStr}</span>
+            ${reactionText}
+            <span onclick="toggleFeedReactPicker('${post.id}')" style="cursor:pointer">😊</span>
+            ${commentCount ? `<span>${commentCount} repl${commentCount === 1 ? "y" : "ies"}</span>` : ""}
+            ${isOwner ? `<span onclick="deleteFeedPost('${post.id}')" style="cursor:pointer">🗑</span>` : ""}
           </div>
-          <div style="font-size:11px;color:var(--text-dim);margin-top:1px">${dateStr}</div>
+
+          <div id="feed-react-picker-${post.id}" class="hidden" style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0">
+            ${userProfile ? REACTIONS_LIST.map(e => `
+              <button onclick="addFeedReaction('${post.id}','${e}');toggleFeedReactPicker('${post.id}')"
+                style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
+                       border-radius:14px;padding:3px 8px;font-size:13px;cursor:pointer;
+                       font-family:var(--font-sans)">${e}</button>`).join("") : ""}
+          </div>
+
+          <div id="feed-comments-${post.id}" class="${feedExpandedComments.has(post.id) ? "" : "hidden"}" style="margin-top:4px">
+            ${renderComments(comments, post.id, "feed")}
+            ${userProfile ? `
+              <div style="display:flex;gap:6px;margin-top:6px">
+                <input type="text" id="feed-comment-input-${post.id}"
+                  placeholder="Reply…" style="flex:1;font-size:12px"
+                  onkeydown="if(event.key==='Enter')submitFeedComment('${post.id}')" />
+                <button class="btn btn-primary btn-sm" onclick="submitFeedComment('${post.id}')">Send</button>
+              </div>` : ""}
+          </div>
         </div>
-        ${isOwner ? `
-          <button onclick="deleteFeedPost('${post.id}')"
-            style="background:none;border:none;color:var(--text-dim);font-size:16px;
-                   cursor:pointer;padding:4px;border-radius:var(--radius-sm)">🗑</button>` : ""}
-      </div>
-
-      <div style="font-size:14px;color:var(--text-warm);line-height:1.55;margin-bottom:10px;white-space:pre-wrap;word-break:break-word">
-        ${esc(post.text || "")}
-      </div>
-      ${post.photoURL ? `<img src="${esc(post.photoURL)}"
-        style="width:100%;border-radius:var(--radius-md);margin-bottom:10px;
-               border:1px solid var(--card-border);display:block" />` : ""}
-
-      <!-- Bottom action bar: compact reaction counts + React + Comments buttons -->
-      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;margin-bottom:4px">
-        <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0"
-          id="feed-reactions-${post.id}">
-          ${renderReactionBadges(reactions, post.id, "feed")}
-        </div>
-        ${userProfile ? `
-          <button onclick="toggleFeedReactPicker('${post.id}')"
-            style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
-                   border-radius:20px;padding:4px 10px;font-size:13px;cursor:pointer;
-                   color:var(--text-muted);font-family:var(--font-sans);flex-shrink:0;
-                   white-space:nowrap">😊 React</button>` : ""}
-        <button onclick="toggleFeedComments('${post.id}')"
-          style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
-                 border-radius:20px;padding:4px 10px;font-size:13px;cursor:pointer;
-                 color:var(--text-muted);font-family:var(--font-sans);flex-shrink:0;
-                 white-space:nowrap">
-          💬${commentCount ? " " + commentCount : ""}
-        </button>
-      </div>
-      <!-- Emoji picker — hidden until React tapped -->
-      <div id="feed-react-picker-${post.id}" class="hidden"
-        style="display:flex;flex-wrap:wrap;gap:5px;padding:6px 0">
-        ${userProfile ? REACTIONS_LIST.map(e => `
-          <button onclick="addFeedReaction('${post.id}','${e}');toggleFeedReactPicker('${post.id}')"
-            style="background:rgba(255,255,255,0.06);border:1px solid var(--card-border);
-                   border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;
-                   font-family:var(--font-sans)">${e}</button>`).join("") : ""}
-      </div>
-
-      <div id="feed-comments-${post.id}" class="${feedExpandedComments.has(post.id) ? "" : "hidden"}">
-        <div class="fade-divider-plain" style="margin:0 0 10px"></div>
-        ${renderComments(comments, post.id, "feed")}
-        ${userProfile ? `
-          <div style="display:flex;gap:8px;margin-top:10px">
-            <input type="text" id="feed-comment-input-${post.id}"
-              placeholder="Add a comment…" style="flex:1"
-              onkeydown="if(event.key==='Enter')submitFeedComment('${post.id}')" />
-            <button class="btn btn-primary btn-sm"
-              onclick="submitFeedComment('${post.id}')">Post</button>
-          </div>` : ""}
       </div>
     </div>
   `;
@@ -6439,8 +6438,8 @@ window.toggleFeedComments = function (id) {
 window.addFeedReaction = async function (id, emoji) {
   await addReaction(id, "feed", emoji);
   const snap = await getDoc(doc(db, "feed", id));
-  const el   = document.getElementById("feed-reactions-" + id);
-  if (el) el.innerHTML = renderReactionBadges(snap.data()?.reactions || {}, id, "feed");
+  const wrap = document.getElementById("feed-post-" + id);
+  if (wrap && snap.exists()) wrap.outerHTML = feedPostCard({ id, ...snap.data() });
 };
 
 window.submitFeedComment = async function (id) {

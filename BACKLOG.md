@@ -243,6 +243,85 @@ harvest/trailcam/tier/contest/calendar cards with correct icons, text, and
 actual app-icon badge (needs an installed PWA) are unverified — no auth in the
 sandbox.
 
+### Feed/bell missing index fix + chat-bubble redesign — SHIPPED in lite-2.19.0
+
+The lite-2.18.0 feed/bell split (`where("isAuto",...)` + `orderBy("createdAt")`)
+needed a Firestore **composite index** that was never deployed — `firestore.indexes.json`
+had `"indexes": []`. Writes (posting) still worked; only the read/listener
+query failed (`failed-precondition`), so the board loaded briefly then flashed
+"Could not load feed." Fixed by adding the `feed` composite index
+(`isAuto` ASC, `createdAt` DESC — covers both the feed's `isAuto==false` query
+and the bell's `isAuto==true` query) and actually running
+`firebase deploy --only firestore:indexes` (committing the file alone doesn't
+push it). Also found and fixed while debugging: this project folder had **no
+`.firebaserc`**, so `firebase deploy` was silently falling back to a different
+cached default project (`family-routine-89e30`) instead of `tucker-s-camp` —
+added `.firebaserc` pinning the project, and ran `firebase use tucker-s-camp`
+to clear the stale per-directory cache in `~/.config/configstore/firebase-tools.json`.
+
+**Feed redesign** (live rapid-iteration session, screenshot → feedback → adjust,
+many small rounds): message cards are now chat bubbles, not full-width blocks.
+Colored per sender using their own avatar color (`colorTint(hex, alpha)`, new
+helper next to `safeColor`) instead of a uniform `--forest-card` background —
+matches the request "whatever color your icon is should represent the color of
+your message box." Own messages right-aligned, others left, bubble width
+shrink-wraps to content (`display:inline-block` + `max-width:100%` inside an
+`80%`-capped flex item) instead of stretching full width. Avatar (36px, same
+size as the composer's own avatar) sits beside the bubble rather than above it;
+name moved off its own line and into the small meta caption below the bubble,
+next to the date, per explicit feedback ("names on top of the bubble is
+awkward"). Bubble shape/padding (`border-radius:var(--radius-xl)`, `10px 16px`)
+deliberately matches the feed composer's own "What's on your mind?" pill — the
+user pointed at that element and said "make the messages look like that."
+Tapping a bubble opens/closes its reply thread directly (`toggleFeedComments`)
+— no separate React/Comment button row; reactions and reply count show as
+plain small text beneath the bubble instead ("who needs the reaction/message
+boxes... we have press technology"). **Real bug found this session:** the
+bubble's `white-space:pre-wrap` was preserving the literal newlines/indentation
+from the multi-line template-literal source around `${esc(post.text)}`, adding
+invisible blank lines above/below every single message — made every bubble
+look sized for 2 lines when it held 1. Fixed by collapsing that div onto one
+source line (plus a defensive `.trim()`). `addFeedReaction` now re-renders the
+one card (`#feed-post-<id>`) via `outerHTML` instead of targeting a reactions
+div that no longer exists in the new layout.
+
+**Bell got the same treatment** on request ("spruce up the notification area
+the same way, i love how that looks") — `notifCard()` switched from a plain
+row with a colored left border to a tinted rounded card
+(`colorTint(color,0.13)` background, `colorTint(color,0.3)` border,
+`var(--radius-lg)`), same visual language as the feed bubbles. First pass
+colored by category (harvest orange, trail cam blue, etc.) but the user found
+that confusing and asked for the same per-member coloring as the feed instead
+("we should color code by user preferred color rather than random color
+breaks"). Fixed via `notifMemberColor(uid)`, which looks the member up in
+`trophyCache.members` (populated by `loadTrophyData()`, now awaited once in
+`openNotifications()` with a re-render after) — calendar entries use their own
+embedded `visitorColor` directly since that's always present. Anything with no
+resolvable member (an unknown/deleted uid, or a future notification type
+that isn't about one specific person) falls back to a fixed
+`NOTIF_DEFAULT_COLOR` blue, per the user's explicit ask for that fallback.
+**Real bug found via this feedback:** the user noticed the SAME person's
+notifications showing two different colors and correctly read that as a bug,
+not a display quirk — traced it to `closeContest()`'s `postAutoFeedEvent`
+call not passing a `uid`, so the contest-winner notification's top-level `uid`
+fell back to whoever CLOSED the season (`userProfile.uid`, usually an admin)
+instead of the actual winner. Fixed by passing `uid: winner.uid` explicitly —
+`winner.uid` was already available in scope, just never forwarded. Every
+other auto-event type (harvest, trailcam, tier) was already correctly
+self-attributed since those are always triggered by the member they're about.
+**Bell badge simplified to a plain dot** — `refreshNotifBadge()` no longer sets
+a count on `#bell-badge`, just toggles `display`; CSS shrunk it from a
+numbered pill to a 9px dot with a thin border matching the header background
+(reads as "something's new," not "here's exactly how many").
+
+**Quick Actions** lost their emoji icons (`actionBtn(icon,label,action)` →
+`actionBtn(label,action)`) per "explore getting rid of all the graphics" —
+text-only rectangular buttons now, `.action-icon` CSS removed.
+
+Verified via repeated `window.__debugSetUser`/`__debugEnterApp`/
+`__debugFeedCards`/`__debugNotif` hook + screenshot rounds at both desktop and
+375px mobile width (all debug hooks removed before finishing, each time).
+
 ### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 
 Built: `renderTrophyRoom` (stat-card feed, camp rankings, by-year bars, award
