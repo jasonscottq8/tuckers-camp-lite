@@ -169,6 +169,33 @@ and add/delete-visit now refresh whichever calendar surface(s) are on screen
 via a shared `refreshAllCalendarViews()`. `cabinpicture.jpg` is unreferenced
 now (left in `Images/`, dropped from the SW precache list).
 
+**Follow-up fixes — DONE in lite-2.16.1** (from the user's first real look):
+Message Camp / Log Harvest now navigate to the Feed / Harvest Log screen before
+opening their quick-entry form, instead of leaving you stranded on Home after
+you close it. Check-in button removed from Home (calendar RSVP covers it;
+`doCheckin`/`doCheckout` left intact but unreachable). Bulletins re-skinned
+red (`--alert-red*` vars) to stand out from the gold/orange everything else
+uses. Calendar day popup's "add yourself" form replaced with a 4-step wizard
+(`calWizardBegin`/`calWizardStep`/`calWizardPick`/`calWizardBumpSpan`) — one
+question per screen with progress dots, instead of every chip row + stepper +
+notes field visible at once.
+
+### Log Harvest wizard — SHIPPED in lite-2.17.0
+
+Extended the calendar-day wizard pattern to Log Harvest, per the user's ask
+("9 times out of 10 the harvest is a deer or a turkey... you can figure how to
+manage the rest"). `openAddHarvest` now opens `showHarvestWizard()` instead of
+the old flat form (edit still uses the flat form — correcting known values
+doesn't need a decision tree). Species screen (Deer / Turkey / Something else)
+branches into a path per `HV_PATHS`: Deer asks buck-or-doe → firearm-or-bow →
+weight/antler details (antler fields skipped for doe); Turkey asks tom/jake/hen
+→ weight/beard/spurs; Something else asks bear (weight + color phase),
+waterfowl or small game (sub-species + quantity, no weight), or other (weight
+only) — every path converges on an optional photo step then notes + date +
+"Log It". Reuses the generic `wizardDots`/`wizardQuestion` helpers built for
+the calendar wizard. Fixed a bug found during testing: the "Something else"
+branch never set `hvWizard.path`, so its progress dots silently never rendered.
+
 ### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 
 Built: `renderTrophyRoom` (stat-card feed, camp rankings, by-year bars, award

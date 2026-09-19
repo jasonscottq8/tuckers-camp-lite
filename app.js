@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.16.0";
+const APP_VERSION = "lite-2.17.0";
 
 
 
@@ -728,7 +728,9 @@ function renderHomeScreen() {
   document.getElementById("home-hero-wrap").innerHTML = `<div id="home-calendar-wrap"></div>`;
   initHomeCalendar();
 
-  renderCheckinButton();
+  // Check-in button removed 2026 — the calendar's "I'm in for this day" RSVP
+  // covers the same "who's here" job with more detail. renderCheckinButton()
+  // and doCheckin/doCheckout still work if this ever needs to come back.
   loadHomeBulletins();
 
   document.getElementById("home-grid-wrap").innerHTML = `
@@ -737,8 +739,8 @@ function renderHomeScreen() {
       <div class="section-title">✦ Quick Actions</div>
     </div>
     <div class="action-stack">
-      ${actionBtn("🦌", "Log Harvest",   "openAddHarvest()")}
-      ${actionBtn("💬", "Message Camp",  "openFeedCompose()")}
+      ${actionBtn("🦌", "Log Harvest",   "goHarvest();openAddHarvest()")}
+      ${actionBtn("💬", "Message Camp",  "goFeed();openFeedCompose()")}
       ${actionBtn("📷", "Trail Cam",     "goTrailCam()")}
       ${actionBtn("🏆", "Trophy Room",   "goTo('screen-mykills')")}
     </div>
@@ -1405,6 +1407,15 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.17.0", date: "Sep 2026", notes: [
+      "Log Harvest is now one question at a time instead of one long form — pick Deer, Turkey, or Something Else and the app only asks what's relevant"
+    ]},
+    { version: "lite-2.16.1", date: "Sep 2026", notes: [
+      "Message Camp and Log Harvest now take you to the actual screen, not just a pop-up window",
+      "Removed the Check In to the Cabin button — the calendar's 'I'm in for this day' covers it",
+      "Bulletins now stand out in red so camp news doesn't get missed",
+      "Adding yourself to a calendar day is now one question at a time instead of one long form"
+    ]},
     { version: "lite-2.16.0", date: "Sep 2026", notes: [
       "The front page now leads with the cabin calendar instead of a photo — weather and moon phase are right there with it",
       "Calendar days now show a plain red dot on anything going on, instead of a fill and a number",
@@ -3319,7 +3330,7 @@ window.openAddHarvest = function () {
   if (!userProfile) { showToast("Sign in to add a harvest.", "error"); return; }
   editingHarvestId  = null;
   harvestDetailData = null;
-  showHarvestForm(null);
+  showHarvestWizard();
 };
 
 window.openEditHarvest = async function (id) {
@@ -3572,6 +3583,368 @@ window.updateDeerFields = function () {
 
 window.closeHarvestForm = function () {
   document.getElementById("harvest-form-overlay")?.remove();
+};
+
+// ============================================================
+// LOG-A-HARVEST WIZARD — one question at a time for a NEW harvest.
+// (Editing an existing harvest still uses the flat form above — you're
+// correcting known values, not being walked through a decision tree.)
+// 9 times out of 10 it's a deer or a turkey, so those get the fast lane;
+// everything else is one tap away under "Something else."
+// ============================================================
+let hvWizard = null;
+
+const HV_PATHS = {
+  deer:   ["deerType", "weapon", "deerDetails", "photo", "finish"],
+  turkey: ["turkeyType", "turkeyDetails", "photo", "finish"],
+  other:  ["otherType", "otherDetails", "photo", "finish"]
+};
+
+function hvChoiceBtn(onclick, icon, label) {
+  return `<button type="button" onclick="${onclick}"
+    style="display:flex;align-items:center;gap:12px;padding:15px 14px;border-radius:var(--radius-md);
+           background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);
+           font-size:15px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:left">
+    <span style="font-size:24px">${icon}</span>${esc(label)}
+  </button>`;
+}
+function hvDotsFor(step) {
+  const seq = hvWizard.path && HV_PATHS[hvWizard.path];
+  const idx = seq ? seq.indexOf(step) : -1;
+  return idx < 0 ? "" : wizardDots(seq.length, idx);
+}
+function hvBackBtn() {
+  return hvWizard.history.length
+    ? `<button type="button" onclick="hvWizardBack()"
+        style="background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;margin-bottom:8px">← Back</button>`
+    : "";
+}
+function hvFriendlyDate(dateVal) {
+  if (dateVal === new Date().toISOString().split("T")[0]) return "Today";
+  return new Date(dateVal + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function showHarvestWizard() {
+  hvWizard = {
+    history: [], stepName: "species", species: null, path: null,
+    deerType: null, weapon: null, turkeySex: null,
+    weight: null, antlerPoints: null, insideSpread: null, rackScore: null,
+    beardLength: null, spurLeft: null, spurRight: null,
+    bearColor: "black", waterfowlType: "duck", smallgameType: "grouse", quantity: 1,
+    notes: "", dateVal: new Date().toISOString().split("T")[0],
+    photoFile: null, photoName: null
+  };
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay"; overlay.id = "harvest-wizard-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:380px;max-height:88vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <button type="button" onclick="closeHarvestWizard();goTo('screen-mykills')"
+          style="background:none;border:none;color:var(--gold);font-size:12px;cursor:pointer;padding:0;font-family:var(--font-sans)">
+          🏆 View My Trophy Room →</button>
+        <button type="button" onclick="closeHarvestWizard()"
+          style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1">✕</button>
+      </div>
+      <div id="hv-wizard-body"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  renderHvStep();
+}
+
+window.closeHarvestWizard = function () {
+  document.getElementById("harvest-wizard-overlay")?.remove();
+  hvWizard = null;
+};
+
+function renderHvStep() {
+  const body = document.getElementById("hv-wizard-body");
+  if (body) body.innerHTML = hvStepHTML(hvWizard.stepName);
+}
+
+window.hvWizardGoto = function (step) {
+  hvWizard.history.push(hvWizard.stepName);
+  hvWizard.stepName = step;
+  renderHvStep();
+};
+window.hvWizardBack = function () {
+  const prev = hvWizard.history.pop();
+  if (prev) { hvWizard.stepName = prev; renderHvStep(); }
+};
+window.hvPickTopSpecies = function (species) {
+  hvWizard.species = species;
+  hvWizard.path = species;
+  hvWizardGoto(HV_PATHS[species][0]);
+};
+window.hvPickOther = function (species) {
+  hvWizard.species = species;
+  hvWizard.path = "other";
+  hvWizardGoto("otherDetails");
+};
+window.hvPick = function (field, value) {
+  hvWizard[field] = value;
+  const seq = HV_PATHS[hvWizard.path];
+  hvWizardGoto(seq[seq.indexOf(hvWizard.stepName) + 1]);
+};
+window.hvPhotoChosen = function (input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  hvWizard.photoFile = file;
+  hvWizard.photoName = file.name;
+  hvWizardGoto("finish");
+};
+window.hvShowDatePicker = function () {
+  document.getElementById("hv-date-display")?.classList.add("hidden");
+  document.getElementById("hv-date")?.classList.remove("hidden");
+};
+
+window.hvSaveDeerDetails = function () {
+  hvWizard.weight       = parseFloat(document.getElementById("hv-weight")?.value) || null;
+  hvWizard.antlerPoints = parseFloat(document.getElementById("hv-points")?.value) || null;
+  hvWizard.insideSpread = parseFloat(document.getElementById("hv-spread")?.value) || null;
+  hvWizard.rackScore    = parseFloat(document.getElementById("hv-score")?.value)  || null;
+  hvWizardGoto("photo");
+};
+window.hvSaveTurkeyDetails = function () {
+  hvWizard.weight      = parseFloat(document.getElementById("hv-weight")?.value)  || null;
+  hvWizard.beardLength = parseFloat(document.getElementById("hv-beard")?.value)   || null;
+  hvWizard.spurLeft    = parseFloat(document.getElementById("hv-spur-l")?.value)  || null;
+  hvWizard.spurRight   = parseFloat(document.getElementById("hv-spur-r")?.value)  || null;
+  hvWizardGoto("photo");
+};
+window.hvSaveOtherDetails = function () {
+  hvWizard.weight        = parseFloat(document.getElementById("hv-weight")?.value) || null;
+  hvWizard.bearColor     = document.getElementById("hv-bear-color")?.value        || hvWizard.bearColor;
+  hvWizard.waterfowlType = document.getElementById("hv-waterfowl-type")?.value    || hvWizard.waterfowlType;
+  hvWizard.smallgameType = document.getElementById("hv-smallgame-type")?.value    || hvWizard.smallgameType;
+  hvWizard.quantity      = parseInt(document.getElementById("hv-quantity")?.value) || 1;
+  hvWizardGoto("photo");
+};
+
+function hvStepHTML(step) {
+  const w = hvWizard;
+
+  if (step === "species") {
+    return `
+      ${wizardQuestion("What did you take?")}
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${hvChoiceBtn("hvPickTopSpecies('deer')", "🦌", "Deer")}
+        ${hvChoiceBtn("hvPickTopSpecies('turkey')", "🦃", "Turkey")}
+        ${hvChoiceBtn("hvWizardGoto('otherType')", "🎯", "Something else")}
+      </div>`;
+  }
+
+  if (step === "deerType") {
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("Buck or doe?")}
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${hvChoiceBtn("hvPick('deerType','buck')", "🦌", "Buck")}
+        ${hvChoiceBtn("hvPick('deerType','doe')", "🦌", "Doe")}
+      </div>`;
+  }
+  if (step === "weapon") {
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("Firearm or bow?")}
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${hvChoiceBtn("hvPick('weapon','firearm')", "🔫", "Firearm — gun or muzzleloader")}
+        ${hvChoiceBtn("hvPick('weapon','archery')", "🏹", "Archery — bow or crossbow")}
+      </div>`;
+  }
+  if (step === "deerDetails") {
+    const isBuck = w.deerType !== "doe";
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("A few details")}
+      <div style="font-size:12px;color:var(--text-dim);text-align:center;margin-bottom:14px">All optional — skip what you don't have.</div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>Hanging Weight (lbs)</label>
+        <input type="number" id="hv-weight" placeholder="${isBuck ? "140" : "110"}" value="${w.weight ?? ""}" min="0" step="0.1" />
+      </div>
+      ${isBuck ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div class="input-group"><label>Antler Points</label><input type="number" id="hv-points" placeholder="8" value="${w.antlerPoints ?? ""}" min="0" step="1" /></div>
+          <div class="input-group"><label>Inside Spread (in)</label><input type="number" id="hv-spread" placeholder='16"' value="${w.insideSpread ?? ""}" min="0" step="0.25" /></div>
+        </div>
+        <div class="input-group" style="margin-bottom:12px">
+          <label>Gross / B&C Score (in)</label>
+          <input type="number" id="hv-score" placeholder='130"' value="${w.rackScore ?? ""}" min="0" step="0.125" />
+        </div>` : ""}
+      <button class="btn btn-primary btn-full" onclick="hvSaveDeerDetails()">Continue</button>`;
+  }
+
+  if (step === "turkeyType") {
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("Tom, jake, or hen?")}
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${hvChoiceBtn("hvPick('turkeySex','tom')", "🦃", "Tom")}
+        ${hvChoiceBtn("hvPick('turkeySex','jake')", "🦃", "Jake")}
+        ${hvChoiceBtn("hvPick('turkeySex','hen')", "🦃", "Hen")}
+      </div>`;
+  }
+  if (step === "turkeyDetails") {
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("A few details")}
+      <div style="font-size:12px;color:var(--text-dim);text-align:center;margin-bottom:14px">All optional — skip what you don't have.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="input-group"><label>Weight (lbs)</label><input type="number" id="hv-weight" placeholder="20" value="${w.weight ?? ""}" min="0" step="0.1" /></div>
+        <div class="input-group"><label>Beard (in)</label><input type="number" id="hv-beard" placeholder='9"' value="${w.beardLength ?? ""}" min="0" step="0.25" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="input-group"><label>Left Spur (in)</label><input type="number" id="hv-spur-l" placeholder='1.5"' value="${w.spurLeft ?? ""}" min="0" step="0.0625" /></div>
+        <div class="input-group"><label>Right Spur (in)</label><input type="number" id="hv-spur-r" placeholder='1.5"' value="${w.spurRight ?? ""}" min="0" step="0.0625" /></div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="hvSaveTurkeyDetails()">Continue</button>`;
+  }
+
+  if (step === "otherType") {
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("What kind?")}
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${hvChoiceBtn("hvPickOther('bear')", "🐻", "Bear")}
+        ${hvChoiceBtn("hvPickOther('waterfowl')", "🦆", "Waterfowl")}
+        ${hvChoiceBtn("hvPickOther('smallgame')", "🐇", "Small Game")}
+        ${hvChoiceBtn("hvPickOther('other')", "🎯", "Other")}
+      </div>`;
+  }
+  if (step === "otherDetails") {
+    let fields;
+    if (w.species === "bear") {
+      fields = `
+        <div class="input-group" style="margin-bottom:12px"><label>Weight (lbs)</label>
+          <input type="number" id="hv-weight" placeholder="200" value="${w.weight ?? ""}" min="0" step="1" /></div>
+        <div class="input-group" style="margin-bottom:12px"><label>Color Phase</label>
+          <select id="hv-bear-color">${["Black","Brown","Cinnamon","Blonde"].map(c =>
+            `<option value="${c.toLowerCase()}" ${w.bearColor === c.toLowerCase() ? "selected" : ""}>${c}</option>`).join("")}</select>
+        </div>`;
+    } else if (w.species === "waterfowl") {
+      fields = `
+        <div class="input-group" style="margin-bottom:12px"><label>Sub-species</label>
+          <select id="hv-waterfowl-type">${["Duck","Goose","Teal","Diver","Merganser","Other"].map(t =>
+            `<option value="${t.toLowerCase()}" ${w.waterfowlType === t.toLowerCase() ? "selected" : ""}>${t}</option>`).join("")}</select>
+        </div>
+        <div class="input-group" style="margin-bottom:12px"><label># Harvested</label>
+          <input type="number" id="hv-quantity" value="${w.quantity || 1}" min="1" step="1" /></div>`;
+    } else if (w.species === "smallgame") {
+      fields = `
+        <div class="input-group" style="margin-bottom:12px"><label>Sub-species</label>
+          <select id="hv-smallgame-type">${["Grouse","Pheasant","Rabbit","Squirrel","Woodcock","Other"].map(t =>
+            `<option value="${t.toLowerCase()}" ${w.smallgameType === t.toLowerCase() ? "selected" : ""}>${t}</option>`).join("")}</select>
+        </div>
+        <div class="input-group" style="margin-bottom:12px"><label># Harvested</label>
+          <input type="number" id="hv-quantity" value="${w.quantity || 1}" min="1" step="1" /></div>`;
+    } else {
+      fields = `<div class="input-group" style="margin-bottom:12px"><label>Weight (lbs, optional)</label>
+        <input type="number" id="hv-weight" placeholder="30" value="${w.weight ?? ""}" min="0" step="0.1" /></div>`;
+    }
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("A few details")}
+      ${fields}
+      <button class="btn btn-primary btn-full" onclick="hvSaveOtherDetails()">Continue</button>`;
+  }
+
+  if (step === "photo") {
+    return `
+      ${hvDotsFor(step)}${hvBackBtn()}
+      ${wizardQuestion("Add a photo?")}
+      <div style="text-align:center;margin-bottom:14px;color:${w.photoName ? "var(--gold)" : "var(--text-muted)"};font-size:12px">
+        ${w.photoName ? "✓ " + esc(w.photoName) : "Optional"}
+      </div>
+      <button type="button" class="btn btn-primary btn-full" style="margin-bottom:10px"
+        onclick="document.getElementById('hv-photo-input').click()">📷 Choose Photo</button>
+      <input type="file" id="hv-photo-input" accept="image/*" style="display:none" onchange="hvPhotoChosen(this)" />
+      <button type="button" onclick="hvWizardGoto('finish')"
+        style="background:none;border:none;color:var(--text-dim);font-size:12.5px;cursor:pointer;display:block;width:100%;text-align:center">
+        ${w.photoFile ? "Continue →" : "Skip for now"}</button>`;
+  }
+
+  // finish
+  return `
+    ${hvDotsFor(step)}${hvBackBtn()}
+    ${wizardQuestion("Anything to add?")}
+    <textarea id="hv-notes" placeholder="Optional — where, conditions, the story…"
+      style="width:100%;margin-bottom:14px;min-height:70px">${esc(w.notes || "")}</textarea>
+    <div style="text-align:center;margin-bottom:18px">
+      <div id="hv-date-display" style="font-size:12px;color:var(--text-dim)">
+        📅 ${esc(hvFriendlyDate(w.dateVal))} ·
+        <button type="button" onclick="hvShowDatePicker()"
+          style="background:none;border:none;color:var(--gold);font-size:12px;cursor:pointer;padding:0;text-decoration:underline">change</button>
+      </div>
+      <input type="date" id="hv-date" value="${w.dateVal}" class="hidden"
+        style="margin-top:8px;width:100%" onchange="hvWizard.dateVal=this.value" />
+    </div>
+    <button class="btn btn-primary btn-full" id="hv-finish-btn" onclick="saveHarvestWizard()">Log It 🏆</button>`;
+}
+
+window.saveHarvestWizard = async function () {
+  const w = hvWizard;
+  if (!w || !userProfile) return;
+  w.notes = document.getElementById("hv-notes")?.value.trim() || "";
+  const btn = document.getElementById("hv-finish-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    let photoURL = null;
+    if (w.photoFile) {
+      if (btn) btn.textContent = "Compressing…";
+      const compressed = await compressImage(w.photoFile);
+      if (btn) btn.textContent = "Uploading photo…";
+      const storageRef = ref(storage, `harvests/${w.dateVal}/${userProfile.uid}_${Date.now()}.jpg`);
+      await uploadBytes(storageRef, compressed, { contentType: "image/jpeg" });
+      photoURL = await getDownloadURL(storageRef);
+    }
+    if (btn) btn.textContent = "Saving…";
+
+    const payload = {
+      species:          w.species,
+      notes:            w.notes,
+      weight:           w.weight,
+      photoURL,
+      weapon:           w.species === "deer" ? (w.weapon || "firearm") : null,
+      deerType:         w.deerType,
+      turkeySex:        w.turkeySex,
+      antlerPoints:     w.antlerPoints,
+      insideSpread:     w.insideSpread,
+      rackScore:        w.rackScore,
+      beardLength:      w.beardLength,
+      spurLeft:         w.spurLeft,
+      spurRight:        w.spurRight,
+      bearColor:        w.species === "bear" ? w.bearColor : null,
+      waterfowlType:    w.species === "waterfowl" ? w.waterfowlType : null,
+      smallgameType:    w.species === "smallgame" ? w.smallgameType : null,
+      quantity:         (w.species === "waterfowl" || w.species === "smallgame") ? (w.quantity || 1) : 1,
+      harvestDate:      Timestamp.fromDate(new Date(w.dateVal + "T12:00:00")),
+      memberName:       userProfile.displayName,
+      uid:              userProfile.uid,
+      uploaderColor:    userProfile.color,
+      uploaderInitials: userProfile.initials,
+      updatedAt:        serverTimestamp(),
+      createdAt:        serverTimestamp(),
+      reactions:        {},
+      comments:         []
+    };
+
+    trophyCache = null;
+    const newDoc = await addDoc(collection(db, "harvests"), payload);
+    closeHarvestWizard();
+    expandedHarvests.add(newDoc.id);
+    trophyAddedPrompt();
+    await recordKill(payload);
+    await postAutoFeedEvent("harvest", {
+      memberName:   userProfile.displayName,
+      speciesIcon:  speciesInfo(payload.species).icon,
+      speciesLabel: speciesInfo(payload.species).label,
+      uid:          userProfile.uid,
+      harvestId:    newDoc.id
+    });
+  } catch (err) {
+    console.error(err);
+    showToast("Could not save: " + err.message, "error");
+    if (btn) { btn.disabled = false; btn.textContent = "Log It 🏆"; }
+  }
 };
 
 window.saveHarvest = async function () {
@@ -4777,33 +5150,140 @@ function relativeDayLabel(dateStr) {
   return diff > 0 ? `In ${wk} week${wk !== 1 ? "s" : ""}` : `${wk} week${wk !== 1 ? "s" : ""} ago`;
 }
 
-// chip picker inside the day popup — single-select within a group
-window.calPickChip = function (btn, group) {
-  const wrap = btn.parentElement;
-  wrap.querySelectorAll("button[data-" + group + "]").forEach(b => {
-    const on = b === btn && !b.classList.contains("cal-chip-on");
-    b.classList.toggle("cal-chip-on", on);
-    b.style.background   = on ? "var(--gold)" : "rgba(255,255,255,0.05)";
-    b.style.color        = on ? "#241206" : "var(--text-warm)";
-    b.style.borderColor  = on ? "transparent" : "var(--card-border)";
-    b.style.fontWeight   = on ? "700" : "500";
-  });
-};
+// ============================================================
+// CALENDAR DAY WIZARD — "add yourself" as one question at a time,
+// instead of a form with every field visible at once.
+// ============================================================
+let calWizard = null;   // { dateStr, isPast, step, purpose, dayPart, spanDays }
 
-// day-count stepper inside the day popup
-window.calBumpSpan = function (delta) {
-  const inp  = document.getElementById("cal-visit-span");
-  const hint = document.getElementById("cal-span-hint");
-  const ov   = document.getElementById("cal-day-overlay");
-  if (!inp) return;
-  const n = Math.min(CAL_MAX_SPAN, Math.max(1, (Number(inp.value) || 1) + delta));
-  inp.value = n;
-  if (!hint) return;
-  if (n === 1) { hint.textContent = "Just this day"; return; }
-  const s = new Date((ov?.dataset.date || "") + "T00:00:00");
+function wizardDots(total, cur) {
+  return `<div style="display:flex;gap:5px;justify-content:center;margin-bottom:16px">
+    ${Array.from({ length: total }, (_, i) => `
+      <span style="width:6px;height:6px;border-radius:50%;
+                   background:${i <= cur ? "var(--gold)" : "rgba(255,255,255,0.15)"}"></span>`).join("")}
+  </div>`;
+}
+function wizardBack(step) {
+  return step > 0
+    ? `<button type="button" onclick="calWizardStep(${step - 1})"
+        style="background:none;border:none;color:var(--text-dim);font-size:12px;
+               cursor:pointer;margin-bottom:8px">← Back</button>`
+    : "";
+}
+function wizardQuestion(text) {
+  return `<div style="font-family:var(--font-serif);font-size:16px;color:var(--text-warm);
+                      text-align:center;margin-bottom:16px">${esc(text)}</div>`;
+}
+
+function wizardStepHTML(step) {
+  const w = calWizard;
+  if (step === 0) {
+    return `
+      ${wizardDots(4, 0)}
+      ${wizardQuestion("What are you headed up for?")}
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${Object.entries(VISIT_PURPOSES).map(([k, m]) => `
+          <button type="button" onclick="calWizardPick('purpose','${k}')"
+            style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:var(--radius-md);
+                   background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);
+                   font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:left">
+            <span style="font-size:19px">${m.icon}</span>${m.label}
+          </button>`).join("")}
+      </div>
+      <button type="button" onclick="calWizardPick('purpose',null)"
+        style="background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;
+               margin-top:12px;display:block;width:100%;text-align:center">Skip this</button>`;
+  }
+  if (step === 1) {
+    return `
+      ${wizardDots(4, 1)}
+      ${wizardBack(1)}
+      ${wizardQuestion("When are you coming?")}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${Object.entries(DAY_PARTS).map(([k, m]) => `
+          <button type="button" onclick="calWizardPick('dayPart','${k}')"
+            style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 8px;
+                   border-radius:var(--radius-md);background:rgba(255,255,255,0.05);
+                   border:1px solid var(--card-border);color:var(--text-warm);font-size:12.5px;
+                   font-weight:600;cursor:pointer;font-family:var(--font-sans)">
+            <span style="font-size:21px">${m.icon}</span>${m.label}
+          </button>`).join("")}
+      </div>
+      <button type="button" onclick="calWizardPick('dayPart',null)"
+        style="background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;
+               margin-top:12px;display:block;width:100%;text-align:center">Skip this</button>`;
+  }
+  if (step === 2) {
+    return `
+      ${wizardDots(4, 2)}
+      ${wizardBack(2)}
+      ${wizardQuestion("How many days at camp?")}
+      <div style="display:flex;align-items:center;justify-content:center;gap:18px;margin-bottom:8px">
+        <button type="button" onclick="calWizardBumpSpan(-1)"
+          style="width:44px;height:44px;border-radius:50%;border:1px solid var(--card-border);
+                 background:rgba(255,255,255,0.05);color:var(--text-warm);font-size:20px;cursor:pointer">−</button>
+        <div id="cal-wizard-span-num" style="min-width:50px;text-align:center;font-size:30px;
+                    font-weight:700;color:var(--gold);font-variant-numeric:tabular-nums">${w.spanDays}</div>
+        <button type="button" onclick="calWizardBumpSpan(1)"
+          style="width:44px;height:44px;border-radius:50%;border:1px solid var(--card-border);
+                 background:rgba(255,255,255,0.05);color:var(--text-warm);font-size:20px;cursor:pointer">+</button>
+      </div>
+      <div id="cal-wizard-span-hint" style="font-size:12px;color:var(--text-dim);text-align:center;margin-bottom:18px">
+        Just this day
+      </div>
+      <button class="btn btn-primary btn-full" onclick="calWizardStep(3)">Continue</button>`;
+  }
+  // step 3 — optional notes, then done
+  return `
+    ${wizardDots(4, 3)}
+    ${wizardBack(3)}
+    ${wizardQuestion("Anything to add? (optional)")}
+    <input type="text" id="cal-visit-notes" placeholder="Stand, plans, what to bring…" maxlength="140"
+      style="width:100%;margin-bottom:16px" />
+    <button class="btn btn-primary btn-full" id="cal-wizard-finish" onclick="saveCalendarVisit('${w.dateStr}')">
+      ${w.isPast ? "Log this day" : "I'm in for this day"}
+    </button>`;
+}
+
+function wizardSpanHint() {
+  const n = calWizard.spanDays;
+  const hintEl = document.getElementById("cal-wizard-span-hint");
+  if (!hintEl) return;
+  if (n === 1) { hintEl.textContent = "Just this day"; return; }
+  const s = new Date(calWizard.dateStr + "T00:00:00");
   const e = new Date(s); e.setDate(e.getDate() + n - 1);
   const f = dd => dd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  hint.textContent = `${n} days · ${f(s)} – ${s.getMonth() === e.getMonth() ? e.getDate() : f(e)}`;
+  hintEl.textContent = `${n} days · ${f(s)} – ${s.getMonth() === e.getMonth() ? e.getDate() : f(e)}`;
+}
+
+window.calWizardBegin = function (dateStr, isPast) {
+  calWizard = { dateStr, isPast, step: 0, purpose: null, dayPart: null, spanDays: 1 };
+  const body = document.getElementById("cal-wizard-body");
+  if (body) body.innerHTML = wizardStepHTML(0);
+  document.getElementById("cal-wizard-intro")?.classList.add("hidden");
+  document.getElementById("cal-wizard-wrap")?.classList.remove("hidden");
+};
+
+window.calWizardStep = function (step) {
+  if (!calWizard) return;
+  calWizard.step = step;
+  const body = document.getElementById("cal-wizard-body");
+  if (body) body.innerHTML = wizardStepHTML(step);
+  if (step === 2) wizardSpanHint();
+};
+
+window.calWizardPick = function (field, value) {
+  if (!calWizard) return;
+  calWizard[field] = value;
+  calWizardStep(calWizard.step + 1);
+};
+
+window.calWizardBumpSpan = function (delta) {
+  if (!calWizard) return;
+  calWizard.spanDays = Math.min(CAL_MAX_SPAN, Math.max(1, calWizard.spanDays + delta));
+  const numEl = document.getElementById("cal-wizard-span-num");
+  if (numEl) numEl.textContent = calWizard.spanDays;
+  wizardSpanHint();
 };
 
 window.goCalendar = function () {
@@ -5098,16 +5578,6 @@ window.openCalendarDay = function (dateStr) {
     }).join("");
   }
 
-  const chipRow = (group, map) => `
-    <div style="display:flex;flex-wrap:wrap;gap:6px">
-      ${Object.entries(map).map(([k, m]) => `
-        <button type="button" data-${group}="${k}" onclick="calPickChip(this,'${group}')"
-          class="cal-chip"
-          style="font-size:12px;font-family:var(--font-sans);border-radius:20px;padding:6px 11px;cursor:pointer;
-                 background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);font-weight:500">
-          ${m.icon} ${m.label}</button>`).join("")}
-    </div>`;
-
   const ov = document.createElement("div");
   ov.className = "modal-overlay"; ov.id = "cal-day-overlay";
   ov.dataset.date = dateStr;
@@ -5150,7 +5620,6 @@ window.openCalendarDay = function (dateStr) {
           ? `<div style="text-align:center;padding:14px 0 18px;color:var(--text-muted)">
                <div style="font-size:30px;margin-bottom:6px">🪵</div>
                <div style="font-size:13px">Nobody's down for this day yet.</div>
-               ${userProfile ? `<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Be the first — add yourself below.</div>` : ""}
              </div>`
           : `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
                ${isPast ? "Who was there" : "Who's coming"}
@@ -5159,31 +5628,19 @@ window.openCalendarDay = function (dateStr) {
         <div id="cal-day-context" style="margin-top:6px"></div>
 
         ${userProfile ? `
-          <div style="margin-top:16px;border-top:1px solid var(--gold-dim);padding-top:14px">
-            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
-              ${myVisits.length ? "Log another" : "Add yourself to this day"}
+          <div style="margin-top:16px;border-top:1px solid var(--gold-dim);padding-top:16px">
+            <div id="cal-wizard-intro">
+              ${myVisits.length
+                ? `<button type="button" onclick="calWizardBegin('${dateStr}',${isPast})"
+                     style="background:none;border:none;color:var(--gold);font-size:12.5px;font-weight:600;
+                            cursor:pointer;display:block;width:100%;text-align:center">+ Log another day for yourself</button>`
+                : `<button class="btn btn-primary btn-full" onclick="calWizardBegin('${dateStr}',${isPast})">
+                     ${isPast ? "Log this day" : "I'm in for this day"} →
+                   </button>`}
             </div>
-            <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">What for?</div>
-            ${chipRow("purpose", VISIT_PURPOSES)}
-            <div style="font-size:12px;color:var(--text-dim);margin:12px 0 6px">When?</div>
-            ${chipRow("daypart", DAY_PARTS)}
-            <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
-              <span style="font-size:12px;color:var(--text-dim);flex:1">How many days at camp?</span>
-              <button type="button" onclick="calBumpSpan(-1)"
-                style="width:30px;height:30px;border-radius:8px;border:1px solid var(--card-border);
-                       background:rgba(255,255,255,0.05);color:var(--text-warm);font-size:16px;cursor:pointer">−</button>
-              <input type="number" id="cal-visit-span" value="1" min="1" max="${CAL_MAX_SPAN}" readonly
-                style="width:44px;text-align:center;padding:6px 0;font-size:14px" />
-              <button type="button" onclick="calBumpSpan(1)"
-                style="width:30px;height:30px;border-radius:8px;border:1px solid var(--card-border);
-                       background:rgba(255,255,255,0.05);color:var(--text-warm);font-size:16px;cursor:pointer">+</button>
+            <div id="cal-wizard-wrap" class="hidden">
+              <div id="cal-wizard-body"></div>
             </div>
-            <div id="cal-span-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px">Just this day</div>
-            <input type="text" id="cal-visit-notes" placeholder="Notes (optional) — stand, camp, plans…"
-              maxlength="140" style="width:100%;margin-top:12px" />
-            <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveCalendarVisit('${dateStr}')">
-              ${isPast ? "Log this day" : "I'm in for this day"}
-            </button>
           </div>` : ""}
       </div>
     </div>`;
@@ -5234,9 +5691,11 @@ window.openAddCalendarVisit = function () {
 window.saveCalendarVisit = async function (dateStr) {
   if (!userProfile) return;
   const notes    = document.getElementById("cal-visit-notes")?.value.trim() || "";
-  const purpose  = document.querySelector('#cal-day-overlay button.cal-chip-on[data-purpose]')?.dataset.purpose || null;
-  const dayPart  = document.querySelector('#cal-day-overlay button.cal-chip-on[data-daypart]')?.dataset.daypart || null;
-  const spanDays = Math.min(CAL_MAX_SPAN, Math.max(1, Number(document.getElementById("cal-visit-span")?.value) || 1));
+  const purpose  = calWizard?.purpose  || null;
+  const dayPart  = calWizard?.dayPart  || null;
+  const spanDays = Math.min(CAL_MAX_SPAN, Math.max(1, calWizard?.spanDays || 1));
+  const btn = document.getElementById("cal-wizard-finish");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
   try {
     await addDoc(collection(db, "visits"), {
       visitDate:        Timestamp.fromDate(new Date(dateStr + "T12:00:00")),
@@ -5250,6 +5709,7 @@ window.saveCalendarVisit = async function (dateStr) {
       spanDays,
       createdAt:        serverTimestamp()
     });
+    calWizard = null;
     document.getElementById("cal-day-overlay")?.remove();
     showToast(
       spanDays > 1
@@ -5260,6 +5720,7 @@ window.saveCalendarVisit = async function (dateStr) {
     await refreshAllCalendarViews();
   } catch(err) {
     console.error(err);
+    if (btn) { btn.disabled = false; btn.textContent = calWizard?.isPast ? "Log this day" : "I'm in for this day"; }
     showToast("Could not save visit.", "error");
   }
 };
