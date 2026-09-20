@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.26.1";
+const APP_VERSION = "lite-2.26.2";
 
 
 
@@ -900,7 +900,6 @@ function renderHomeScreen() {
   // same "who's here" job with more detail. renderCheckinButton() and
   // doCheckin/doCheckout still work if this ever needs to come back.
   loadHomeBulletins();
-  loadHomeHarvests();
 
   document.getElementById("home-grid-wrap").innerHTML = `
     <div class="fade-divider" style="margin:16px 16px;"></div>
@@ -930,6 +929,7 @@ function renderHomeScreen() {
     </div>
     <div style="height:8px"></div>
   `;
+  loadHomeHarvests();
 }
 
 function actionBtn(label, action) {
@@ -1575,6 +1575,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.26.2", date: "Sep 2026", notes: [
+      "Fixed: Home screen's Recent Harvests was still showing empty even with harvests logged — it was checking for a piece of the page that didn't exist yet"
+    ]},
     { version: "lite-2.26.1", date: "Sep 2026", notes: [
       "Fixed: you can now post a photo to the message feed without also having to write something"
     ]},

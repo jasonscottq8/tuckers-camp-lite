@@ -922,6 +922,58 @@ write path is unverified live, same sandbox-has-no-auth limitation as every
 other write path in this project — the fix itself is a simple guard-clause
 and template change, not new async logic, so this is low risk.
 
+### Real bug: the lite-2.25.0 Home-harvests fix never actually ran — SHIPPED in lite-2.26.2
+
+The lite-2.25.0 fix for "Recent Harvests stays empty until you open the
+Harvest Log" ([[tuckers-camp-lite]] entry above) shipped a `loadHomeHarvests()`
+one-shot fetch, but placed the call in the wrong spot within
+`renderHomeScreen()` — **before** the line that actually creates the
+`#recent-harvests-list` DOM element (`home-harvests-wrap`'s `innerHTML`
+assignment came 15 lines later in the same function). `loadHomeHarvests()`
+opens with `if (!document.getElementById("recent-harvests-list")) return;` —
+a guard meant to bail out cleanly if the Home screen isn't showing, but
+which fired every single time, because the element it was checking for
+didn't exist YET at that point in the function, not because the screen
+wasn't showing. The fetch never ran; the static placeholder text ("No
+recent harvests yet. Be the first to log one!") was never replaced. This
+shipped, deployed, and sat live for two versions before the user actually
+had two real harvests logged and caught it: "interesting how the recent
+harvests still say no recent harvests yet, even though there are two
+harvests in the log already."
+
+User's follow-up framing — "it shouldnt necessarily be 'recent' as much as
+'what were the last few harvested'" — turned out to already be exactly what
+the query does (`orderBy("harvestDate","desc"), limit(3)`, no time-window
+`where` clause at all — it was never filtering to "within the last N days,"
+just always returning the 3 latest by date regardless of how long ago).
+Worth stating back to the user: the label "Recent Harvests" was a slight
+misnomer for what's actually "last 3 harvests, whenever they happened," but
+the underlying behavior already matched what they wanted — the fetch just
+never fired.
+
+**Fix:** moved the `loadHomeHarvests()` call from right after
+`loadHomeBulletins()` (before `#recent-harvests-list` exists) to immediately
+after the `home-harvests-wrap.innerHTML` assignment that creates it, at the
+very end of `renderHomeScreen()`. Confirmed structurally rather than by
+re-testing the live query (still sandbox-has-no-auth) — JS's single-threaded
+execution guarantees no async gap between the synchronous `innerHTML`
+assignment and the very next synchronous line in the same function, so by
+the time `loadHomeHarvests()`'s own guard checks
+`document.getElementById(...)`, the element is definitely there. Verified
+via a temporary `window.__debugSetUser`/`__debugEnterApp` hook that the
+element exists in the DOM once `renderHomeScreen()` completes (removed
+after) — this was the exact failure mode, so confirming the ordering is
+sufficient; the query logic itself was already correct and unchanged from
+lite-2.25.0.
+
+**Lesson for future "add a one-shot fetch on screen render" fixes in this
+app:** always check where the target DOM element is actually created inside
+the render function, not just that the function exists somewhere in the same
+call chain — a guard clause that checks `document.getElementById` can fail
+silently and look identical to "the feature just doesn't have data yet,"
+which is exactly why this sat unnoticed through a full version and a live
+deploy.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
