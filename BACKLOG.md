@@ -589,6 +589,59 @@ Same session, quick follow-ups.
    Waterfowl show `open now*`, Bear and Turkey (fall, currently open) show
    plain `open now` — matching the user's stated expectation exactly.
 
+### Kill-points/tier system removed + app-wide animal-graphics sweep — SHIPPED in lite-2.23.0
+
+Same session, two more asks. User: "weve employed a lot of graphics in this
+and even a small game that allows you to collect points for harvests, and
+reach award tiers with those points. id like to remove all that and keep it
+as a static harvest log page... we can keep the trophy room and all that but
+id like to get rid of the game for now." Followed by: "id like to have the
+app free of those animal graphics unless its a reaction in the message feed,"
+tightened to "no graphics from that list at all. save for a few reaction
+options, i want all text," with one carve-out: "the notifications bell can
+stay."
+
+1. **Kill-points/tier system deleted entirely.** `KILL_TIERS`, `KILL_POINTS`,
+   `getTierForPoints`, `getNextTier`, `updateKillCounter`, `recordKill`,
+   `showTierPopup`, `pointsReferenceHTML`, `computeKillPoints`, and every call
+   site (harvest save/delete, admin delete, feed post payload) are gone, along
+   with the header's kill-counter badge (`index.html`), the Trophy Room's
+   "Rank & points" card and "How points work" section, and the Cabin Trophy
+   Room's "Most kill points" category. Harvest Log and Trophy Room (My Trophy
+   Room + Cabin Trophy Room) are otherwise unchanged — non-points stat
+   categories, contests, and camp records all still work exactly as before.
+   Old user docs keep their now-unused `killPoints`/`totalKills` fields
+   (ignored, matching how this app has always left harmless residue on old
+   docs rather than migrating them).
+2. **Animal emoji removed everywhere except two exceptions.** Species icons
+   (🦌🦃🐻🦆🐇🐿️, plus 🎯 for "Other") are stripped from every display surface
+   that isn't the bell or feed reactions: Home's "Recent Harvests," the
+   Harvest Log's row headers/species filter tabs/empty state/edit-species
+   dropdown, both Trophy Rooms' harvest-log rows and turkey-badge fallback,
+   the Seasons page (already done in the prior batch), Contests' group/tab/
+   enter buttons, the harvest wizard's species/buck-doe/weapon pickers, the
+   calendar's "On this day" harvest widget, and admin's harvest list/stats
+   grid. The two kept exceptions: the Notifications bell (`notifCard`,
+   `AUTO_FEED_TYPES`) still renders its icons, and the feed's reaction system
+   (`REACTIONS_LIST`) is untouched. Where an icon field feeds bell rendering
+   as *data* (`SEASON_DEFAULTS[].icon` → `seasonIcon`, `SPECIES[].icon` →
+   `speciesIcon` on auto-feed-event payloads), the field stays in the source
+   array — only the on-screen *display* of it was removed from non-bell
+   consumers.
+3. **Three real bugs found and fixed during the sweep**, all leftover
+   references to code deleted in earlier batches but never fully cleaned up:
+   a `ReferenceError: tier is not defined` in My Trophy Room's hero-line
+   builder (a dead reference to the old points-tier variable); a Contests tab
+   bar rendering "undefined Buck/Doe/Bow" because `CONTESTS[id].icon` was
+   removed but a tab template still read it; and a
+   `ReferenceError: yearPtsLeader is not defined` that broke the Cabin Trophy
+   Room outright (a `computeCampStats` return field left over from the old
+   kill-points-per-year leaderboard, which had no other consumers). All three
+   were caught by browser-verifying with a temporary fake trophy cache
+   (`window.__debugTrophyCache`), not by static analysis — `node --check`
+   passed the whole time since these were all valid-but-wrong references, not
+   syntax errors.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,

@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.22.4";
+const APP_VERSION = "lite-2.23.0";
 
 
 
@@ -632,9 +632,6 @@ function enterApp() {
   // Build home screen
   renderHomeScreen();
 
-  // Init kill counter
-  updateKillCounter();
-
   // Bell badge / app-icon dot — live for the whole session, not just the bell screen
   startNotifListeners();
   checkSeasonAnnouncements();
@@ -921,7 +918,7 @@ function renderHomeScreen() {
     <div class="fade-divider" style="margin:16px 16px;"></div>
     <div class="harvests-panel">
       <div class="harvests-header">
-        <div class="section-title" style="font-size:15px">🦌 Recent Harvests</div>
+        <div class="section-title" style="font-size:15px">Recent Harvests</div>
         <button class="btn-action btn-sm" onclick="goHarvest()">View All</button>
       </div>
       <div id="recent-harvests-list">
@@ -1577,6 +1574,10 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.23.0", date: "Sep 2026", notes: [
+      "Removed the kill-points and tier system — no more kill counter, ranks, or tier-up popups. Harvest Log and Trophy Room are unchanged otherwise",
+      "Removed animal icons throughout the app (Home, Harvest Log, Trophy Room, Contests, harvest form) — everything is now text-only, except the Notifications bell and message feed reactions"
+    ]},
     { version: "lite-2.22.4", date: "Sep 2026", notes: [
       "Seasons page categories now start collapsed, in blaze-orange buttons matching the rest of the app",
       "A * on a season category means it's only partly open — like archery deer being in while gun season isn't yet — expand it to see exactly what's active"
@@ -1886,11 +1887,11 @@ function renderBylawsScreen() {
 // species; labels spell out which zone/split each row covers.
 // ============================================================
 const SEASON_GROUPS = {
-  deer:      { label: "Deer",                    icon: "🦌" },
-  bear:      { label: "Bear",                    icon: "🐻" },
-  turkey:    { label: "Turkey",                  icon: "🦃" },
-  smallgame: { label: "Small Game & Upland Birds", icon: "🐇" },
-  waterfowl: { label: "Waterfowl",               icon: "🦆" }
+  deer:      { label: "Deer" },
+  bear:      { label: "Bear" },
+  turkey:    { label: "Turkey" },
+  smallgame: { label: "Small Game & Upland Birds" },
+  waterfowl: { label: "Waterfowl" }
 };
 const SEASON_DEFAULTS = [
   { group: "deer", icon: "🏹", label: "Archery & Crossbow",              start: "2026-09-12", end: "2027-01-03" },
@@ -2052,35 +2053,35 @@ function nwtfFromHarvest(h) {
 
 const CONTESTS = {
   buck: {
-    label: "Big Buck", short: "Buck", icon: "🦌", group: "deer", unit: '"', scoring: "single", noun: "buck",
+    label: "Big Buck", short: "Buck", group: "deer", unit: '"', scoring: "single", noun: "buck",
     seasonNote: "Firearm bucks. Ranked by gross / B&C score.", needField: "a gross / B&C score",
     metric: h => Number(h.rackScore) || 0,
     pick:   h => h.species === "deer" && h.deerType === "buck" && h.weapon !== "archery" && Number(h.rackScore) > 0,
     eligible: h => h.species === "deer" && h.deerType === "buck" && h.weapon !== "archery"
   },
   doe: {
-    label: "Big Doe", short: "Doe", icon: "🦌", group: "deer", unit: ' lbs', scoring: "single", noun: "doe",
+    label: "Big Doe", short: "Doe", group: "deer", unit: ' lbs', scoring: "single", noun: "doe",
     seasonNote: "Ranked by hanging weight.", needField: "its weight",
     metric: h => Number(h.weight) || 0,
     pick:   h => h.species === "deer" && h.deerType === "doe" && Number(h.weight) > 0,
     eligible: h => h.species === "deer" && h.deerType === "doe"
   },
   bowbuck: {
-    label: "Bow Buck", short: "Bow", icon: "🏹", group: "deer", unit: '"', scoring: "single", noun: "buck",
+    label: "Bow Buck", short: "Bow", group: "deer", unit: '"', scoring: "single", noun: "buck",
     seasonNote: "Archery bucks. Ranked by gross / B&C score.", needField: "a gross / B&C score",
     metric: h => Number(h.rackScore) || 0,
     pick:   h => h.species === "deer" && h.deerType === "buck" && h.weapon === "archery" && Number(h.rackScore) > 0,
     eligible: h => h.species === "deer" && h.deerType === "buck" && h.weapon === "archery"
   },
   springturkey: {
-    label: "Spring Turkey", short: "Spring", icon: "🦃", group: "turkey", unit: "", scoring: "turkey", noun: "turkey",
+    label: "Spring Turkey", short: "Spring", group: "turkey", unit: "", scoring: "turkey", noun: "turkey",
     seasonNote: "Spring birds. NWTF score — beard and spurs push it up.", needField: "its weight",
     metric: nwtfFromHarvest,
     pick:   h => h.species === "turkey" && turkeySeason(h) === "spring" && Number(h.weight) > 0,
     eligible: h => h.species === "turkey" && turkeySeason(h) === "spring"
   },
   fallturkey: {
-    label: "Fall Turkey", short: "Fall", icon: "🦃", group: "turkey", unit: "", scoring: "turkey", noun: "turkey",
+    label: "Fall Turkey", short: "Fall", group: "turkey", unit: "", scoring: "turkey", noun: "turkey",
     seasonNote: "Fall birds, either sex. A hen just scores her weight.", needField: "its weight",
     metric: nwtfFromHarvest,
     pick:   h => h.species === "turkey" && turkeySeason(h) === "fall" && Number(h.weight) > 0,
@@ -2088,9 +2089,9 @@ const CONTESTS = {
   }
 };
 const CONTEST_GROUPS = {
-  deer:   { label: "Deer",   icon: "🦌", tabs: ["buck", "doe", "bowbuck"],
+  deer:   { label: "Deer",   tabs: ["buck", "doe", "bowbuck"],
             accent: "linear-gradient(135deg,var(--orange),var(--orange-bright))" },
-  turkey: { label: "Turkey", icon: "🦃", tabs: ["springturkey", "fallturkey"],
+  turkey: { label: "Turkey", tabs: ["springturkey", "fallturkey"],
             accent: "linear-gradient(135deg,#8a6d3b,#b28a44)" }
 };
 
@@ -2179,7 +2180,7 @@ function renderContestsScreen() {
              font-family:var(--font-sans);cursor:pointer;border:1px solid var(--card-border);
              ${group === gid ? `background:${g.accent};border-color:transparent;color:#fff`
                              : "background:rgba(255,255,255,0.05);color:var(--text-muted)"}">
-      ${g.icon} ${g.label}</button>`;
+      ${g.label}</button>`;
   const c = CONTESTS[contestTab];
   el.innerHTML = `
     <div style="padding:12px 16px 8px;display:flex;gap:8px">
@@ -2193,7 +2194,7 @@ function renderContestsScreen() {
                  font-family:var(--font-sans);cursor:pointer;
                  ${contestTab === id ? `background:${CONTEST_GROUPS[group].accent};border:1px solid transparent;color:#fff`
                                      : "background:rgba(255,255,255,0.06);border:1px solid var(--card-border);color:var(--text-muted)"}">
-          ${t.icon} ${t.short}</button>`;
+          ${t.short}</button>`;
       }).join("")}
     </div>
     <div style="padding:2px 16px 0;font-size:12px;color:var(--text-muted)">
@@ -2329,7 +2330,7 @@ function renderContestBoard() {
   } else if (!entered) {
     action = `<button class="btn btn-full" onclick="joinContest()"
         style="margin-top:14px;background:${accent};border:none;color:#fff;font-weight:700">
-        ${c.icon} Enter ${esc(c.label)}</button>`;
+        Enter ${esc(c.label)}</button>`;
   } else {
     if (needsData) {
       action = `<div style="background:rgba(212,98,42,0.12);border:1px solid rgba(212,98,42,0.4);border-radius:var(--radius-lg);
@@ -2708,7 +2709,7 @@ async function renderAdminContent(inner) {
         📋 View All Feed Posts
       </button>
       <button class="btn btn-secondary btn-full" onclick="adminViewAllHarvests()">
-        🦌 View All Harvests
+        View All Harvests
       </button>
       <button class="btn btn-secondary btn-full" onclick="adminViewAllTrailCam()">
         📷 View All Trail Cam Photos
@@ -2784,18 +2785,6 @@ window.adminDeleteHarvest = function (id, data) {
       await deleteDoc(doc(db, "harvests", id));
       if (!keepPhoto) await deleteStoredImage(data?.photoURL);
       trophyCache = null;
-      if (data?.uid) {
-        try {
-          const userRef  = doc(db, "users", data.uid);
-          const userSnap = await getDoc(userRef);
-          const userData = userSnap.data() || {};
-          const pts      = computeKillPoints(data);
-          await updateDoc(userRef, {
-            killPoints: Math.max(0, (userData.killPoints || 0) - pts),
-            totalKills: Math.max(0, (userData.totalKills || 0) - 1)
-          });
-        } catch (e) { console.error("Kill point adjustment failed:", e); }
-      }
       await writeAdminLog(
         "delete_harvest",
         { uid: data?.uid, name: data?.memberName },
@@ -3036,7 +3025,7 @@ async function renderAdminStats(inner) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       ${[
         ["👥", "Members",    users.size],
-        ["🦌", "Harvests",   harvests.size],
+        ["", "Harvests",   harvests.size],
         ["📷", "Trail Cam",  trailcam.size],
         ["💬", "Feed Posts", feed.size],
         ["📢", "Bulletins",  bulletins.size],
@@ -3137,7 +3126,7 @@ async function renderAdminViewAllHarvests() {
         return `<div style="border:1px solid var(--card-border);border-radius:var(--radius-md);
                             padding:10px;margin-bottom:8px">
           <div style="font-size:13px;color:var(--text-warm);margin-bottom:6px">
-            ${sp.icon} ${sp.label} · ${esc(h.memberName)} · ${formatDate(h.harvestDate)}
+            ${sp.label} · ${esc(h.memberName)} · ${formatDate(h.harvestDate)}
           </div>
           <button class="btn btn-danger btn-sm"
             onclick="adminDeleteHarvest('${d.id}')">
@@ -3267,7 +3256,7 @@ window.renderHarvestScreen = function () {
         onclick="filterHarvests(\'all\')">All</button>
       ${SPECIES.map(s =>
         `<button class="harvest-filter-btn" data-species="${s.id}"
-          onclick="filterHarvests(\'${s.id}\')">${s.icon} ${s.label}</button>`
+          onclick="filterHarvests(\'${s.id}\')">${s.label}</button>`
       ).join("")}
     </div>
     <div class="fade-divider-plain"></div>
@@ -3317,7 +3306,6 @@ function renderHarvestList(snap, speciesFilter) {
   if (docs.length === 0) {
     wrap.innerHTML = `
       <div style="text-align:center;padding:48px 0;color:var(--text-muted)">
-        <div style="font-size:48px;margin-bottom:12px">🦌</div>
         <div>No harvests logged yet.</div>
         <div style="font-size:12px;margin-top:6px">Tap + to log the first one!</div>
       </div>`;
@@ -3342,7 +3330,7 @@ function renderHarvestList(snap, speciesFilter) {
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:14px;font-weight:600;color:var(--text-warm)">
-              ${sp.icon} ${sp.label}
+              ${sp.label}
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
               ${esc(h.memberName || "Unknown")} · ${dateStr}${weight}${score}
@@ -3523,7 +3511,6 @@ function refreshHomeHarvests(docs) {
                color:var(--text-warm);font-family:var(--font-sans);transition:background 0.2s;"
         onmouseover="this.style.background=\'rgba(196,169,106,0.05)\'"
         onmouseout="this.style.background=\'none\'">
-        <span style="font-size:24px">${sp.icon}</span>
         <div style="flex:1">
           <div style="font-size:14px;font-weight:600">${sp.label}</div>
           <div style="font-size:12px;color:var(--text-muted)">${esc(h.memberName || "Unknown")} · ${dateStr}</div>
@@ -3733,7 +3720,7 @@ function showHarvestForm(data) {
       <div class="input-group" style="margin-bottom:12px">
         <label>Species</label>
         <select id="hf-species" onchange="updateHarvestFields()">
-          ${SPECIES.map(s => `<option value="${s.id}" ${d.species===s.id?"selected":""}>${s.icon} ${s.label}</option>`).join("")}
+          ${SPECIES.map(s => `<option value="${s.id}" ${d.species===s.id?"selected":""}>${s.label}</option>`).join("")}
         </select>
       </div>
 
@@ -3788,13 +3775,13 @@ window.updateHarvestFields = function (existingData) {
                           background:rgba(255,255,255,0.05);border:1px solid var(--card-border);
                           border-radius:var(--radius-md);cursor:pointer">
               <input type="radio" name="deer-type" value="buck" ${d.deerType!=="doe"?"checked":""} onchange="updateDeerFields()" />
-              <span>🦌 Buck</span>
+              <span>Buck</span>
             </label>
             <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 12px;
                           background:rgba(255,255,255,0.05);border:1px solid var(--card-border);
                           border-radius:var(--radius-md);cursor:pointer">
               <input type="radio" name="deer-type" value="doe" ${d.deerType==="doe"?"checked":""} onchange="updateDeerFields()" />
-              <span>🦌 Doe</span>
+              <span>Doe</span>
             </label>
           </div>
         </div>
@@ -3805,13 +3792,13 @@ window.updateHarvestFields = function (existingData) {
                           background:rgba(255,255,255,0.05);border:1px solid var(--card-border);
                           border-radius:var(--radius-md);cursor:pointer;font-size:13px">
               <input type="radio" name="deer-weapon" value="firearm" ${d.weapon!=="archery"?"checked":""} />
-              <span>🔫 Firearm</span>
+              <span>Firearm</span>
             </label>
             <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 12px;
                           background:rgba(255,255,255,0.05);border:1px solid var(--card-border);
                           border-radius:var(--radius-md);cursor:pointer;font-size:13px">
               <input type="radio" name="deer-weapon" value="archery" ${d.weapon==="archery"?"checked":""} />
-              <span>🏹 Archery</span>
+              <span>Archery</span>
             </label>
           </div>
           <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Firearm = gun or muzzleloader · Archery = bow or crossbow</div>
@@ -3973,12 +3960,12 @@ const HV_PATHS = {
   other:  ["otherType", "otherDetails", "photo", "finish"]
 };
 
-function hvChoiceBtn(onclick, icon, label) {
+function hvChoiceBtn(onclick, label) {
   return `<button type="button" onclick="${onclick}"
-    style="display:flex;align-items:center;gap:12px;padding:15px 14px;border-radius:var(--radius-md);
+    style="display:flex;align-items:center;padding:15px 14px;border-radius:var(--radius-md);
            background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);
            font-size:15px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:left">
-    <span style="font-size:24px">${icon}</span>${esc(label)}
+    ${esc(label)}
   </button>`;
 }
 function hvDotsFor(step) {
@@ -4100,9 +4087,9 @@ function hvStepHTML(step) {
     return `
       ${wizardQuestion("What did you take?")}
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${hvChoiceBtn("hvPickTopSpecies('deer')", "🦌", "Deer")}
-        ${hvChoiceBtn("hvPickTopSpecies('turkey')", "🦃", "Turkey")}
-        ${hvChoiceBtn("hvWizardGoto('otherType')", "🎯", "Something else")}
+        ${hvChoiceBtn("hvPickTopSpecies('deer')", "Deer")}
+        ${hvChoiceBtn("hvPickTopSpecies('turkey')", "Turkey")}
+        ${hvChoiceBtn("hvWizardGoto('otherType')", "Something else")}
       </div>`;
   }
 
@@ -4111,8 +4098,8 @@ function hvStepHTML(step) {
       ${hvDotsFor(step)}${hvBackBtn()}
       ${wizardQuestion("Buck or doe?")}
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${hvChoiceBtn("hvPick('deerType','buck')", "🦌", "Buck")}
-        ${hvChoiceBtn("hvPick('deerType','doe')", "🦌", "Doe")}
+        ${hvChoiceBtn("hvPick('deerType','buck')", "Buck")}
+        ${hvChoiceBtn("hvPick('deerType','doe')", "Doe")}
       </div>`;
   }
   if (step === "weapon") {
@@ -4120,8 +4107,8 @@ function hvStepHTML(step) {
       ${hvDotsFor(step)}${hvBackBtn()}
       ${wizardQuestion("Firearm or bow?")}
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${hvChoiceBtn("hvPick('weapon','firearm')", "🔫", "Firearm — gun or muzzleloader")}
-        ${hvChoiceBtn("hvPick('weapon','archery')", "🏹", "Archery — bow or crossbow")}
+        ${hvChoiceBtn("hvPick('weapon','firearm')", "Firearm — gun or muzzleloader")}
+        ${hvChoiceBtn("hvPick('weapon','archery')", "Archery — bow or crossbow")}
       </div>`;
   }
   if (step === "deerDetails") {
@@ -4151,9 +4138,9 @@ function hvStepHTML(step) {
       ${hvDotsFor(step)}${hvBackBtn()}
       ${wizardQuestion("Tom, jake, or hen?")}
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${hvChoiceBtn("hvPick('turkeySex','tom')", "🦃", "Tom")}
-        ${hvChoiceBtn("hvPick('turkeySex','jake')", "🦃", "Jake")}
-        ${hvChoiceBtn("hvPick('turkeySex','hen')", "🦃", "Hen")}
+        ${hvChoiceBtn("hvPick('turkeySex','tom')", "Tom")}
+        ${hvChoiceBtn("hvPick('turkeySex','jake')", "Jake")}
+        ${hvChoiceBtn("hvPick('turkeySex','hen')", "Hen")}
       </div>`;
   }
   if (step === "turkeyDetails") {
@@ -4177,10 +4164,10 @@ function hvStepHTML(step) {
       ${hvDotsFor(step)}${hvBackBtn()}
       ${wizardQuestion("What kind?")}
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${hvChoiceBtn("hvPickOther('bear')", "🐻", "Bear")}
-        ${hvChoiceBtn("hvPickOther('waterfowl')", "🦆", "Waterfowl")}
-        ${hvChoiceBtn("hvPickOther('smallgame')", "🐇", "Small Game")}
-        ${hvChoiceBtn("hvPickOther('other')", "🎯", "Other")}
+        ${hvChoiceBtn("hvPickOther('bear')", "Bear")}
+        ${hvChoiceBtn("hvPickOther('waterfowl')", "Waterfowl")}
+        ${hvChoiceBtn("hvPickOther('smallgame')", "Small Game")}
+        ${hvChoiceBtn("hvPickOther('other')", "Other")}
       </div>`;
   }
   if (step === "otherDetails") {
@@ -4305,7 +4292,6 @@ window.saveHarvestWizard = async function () {
     closeHarvestWizard();
     expandedHarvests.add(newDoc.id);
     trophyAddedPrompt();
-    await recordKill(payload);
     await postAutoFeedEvent("harvest", {
       memberName:   userProfile.displayName,
       speciesIcon:  speciesInfo(payload.species).icon,
@@ -4391,8 +4377,6 @@ window.saveHarvest = async function () {
       closeHarvestForm();
       expandedHarvests.add(newDoc.id);
       trophyAddedPrompt();
-      // Record kill points + post to feed
-      await recordKill(payload);
       await postAutoFeedEvent("harvest", {
         memberName:   userProfile.displayName,
         speciesIcon:  speciesInfo(payload.species).icon,
@@ -4431,7 +4415,7 @@ function trophyAddedPrompt() {
 }
 
 window.deleteHarvest = function (id) {
-  appConfirm("Delete Harvest", "Permanently delete this harvest? This will also remove the feed notification and adjust your kill points.", async () => {
+  appConfirm("Delete Harvest", "Permanently delete this harvest? This will also remove the feed notification.", async () => {
     try {
       trophyCache = null;
       // Get harvest data before deleting
@@ -4442,19 +4426,6 @@ window.deleteHarvest = function (id) {
       await deleteDoc(doc(db, "harvests", id));
       await deleteStoredImage(hData?.photoURL);
       expandedHarvests.delete(id);
-
-      // Subtract kill points from the HARVEST'S OWNER — not whoever clicked delete
-      // (an admin can delete another member's harvest; don't touch the admin's own stats).
-      if (hData?.uid) {
-        const userRef  = doc(db, "users", hData.uid);
-        const userSnap = await getDoc(userRef);
-        const userData = userSnap.data() || {};
-        let pts = computeKillPoints(hData);
-        const newPts   = Math.max(0, (userData.killPoints  || 0) - pts);
-        const newKills = Math.max(0, (userData.totalKills  || 0) - 1);
-        await updateDoc(userRef, { killPoints: newPts, totalKills: newKills });
-        if (hData.uid === userProfile?.uid) updateKillCounter();
-      }
 
       // Delete the ONE auto feed post tied to this harvest (older posts written
       // before harvestId existed simply stay — better than nuking them all).
@@ -4470,19 +4441,6 @@ window.deleteHarvest = function (id) {
     } catch(err) { console.error(err); showToast("Could not delete.", "error"); }
   });
 };
-
-function computeKillPoints(hData) {
-  const sp = hData.species;
-  if (sp === "deer") return hData.deerType === "buck" ? KILL_POINTS.deer_buck : KILL_POINTS.deer_doe;
-  if (sp === "turkey") return (hData.turkeySex === "tom") ? KILL_POINTS.turkey_tom : KILL_POINTS.turkey_jake;
-  if (sp === "bear")      return KILL_POINTS.bear;
-  if (sp === "waterfowl") return KILL_POINTS.waterfowl * (hData.quantity || 1);
-  if (sp === "smallgame") return KILL_POINTS.smallgame * (hData.quantity || 1);
-  if (sp === "coyote")    return KILL_POINTS.coyote;
-  if (sp === "wolf")      return KILL_POINTS.wolf;
-  if (sp === "fox")       return KILL_POINTS.fox;
-  return KILL_POINTS.other || 2;
-}
 
 // ============================================================
 // IMAGE COMPRESSION — resize before upload for fast seamless uploads
@@ -6054,7 +6012,7 @@ async function fillCalDayContext(dateStr, dateObj) {
     <div style="margin-top:14px;background:var(--forest-card);border:1px solid var(--card-border);
                 border-radius:var(--radius-md);padding:12px">
       <div style="font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
-        🦌 On this day
+        On this day
       </div>
       ${harvests.map(h => {
         const sp = speciesInfo(h.species);
@@ -6063,7 +6021,7 @@ async function fillCalDayContext(dateStr, dateObj) {
         const detail = Number(h.rackScore) ? ` · ${h.rackScore}" B&C`
                      : Number(h.weight)    ? ` · ${h.weight} lbs` : "";
         return `<div style="font-size:12px;color:var(--text-warm);padding:3px 0">
-          ${sp.icon} ${esc(who)} — ${esc(what)}${detail}
+          ${esc(who)} — ${esc(what)}${detail}
         </div>`;
       }).join("")}
     </div>`;
@@ -6124,155 +6082,6 @@ window.deleteCalendarVisit = function (id) {
   });
 };
 
-
-// ============================================================
-// KILL COUNTER & TIER SYSTEM
-// ============================================================
-
-const KILL_TIERS = [
-  { tier:1, name:"Gold",              icon:"⭐",       pts:1,    msg:"You're on the board. Welcome to the harvest log." },
-  { tier:2, name:"Double Gold",       icon:"⭐⭐",     pts:25,   msg:"You're getting out there. The woods are starting to notice." },
-  { tier:3, name:"Triple Gold",       icon:"⭐⭐⭐",   pts:75,   msg:"That's a real body count. You know what you're doing out there." },
-  { tier:4, name:"Diamond",           icon:"💎",       pts:150,  msg:"Straight up lethal. Most hunters never see numbers like this." },
-  { tier:5, name:"Royal Description", icon:"👑",       pts:300,  msg:"You are the apex predator at Tucker's Camp. Full stop." },
-  { tier:6, name:"Unknown Element",   icon:"☢️",      pts:600,  msg:"At this point you're a biological threat to the local wildlife population." },
-  { tier:7, name:"Elementa Infinitum",icon:"🌟",       pts:1000, msg:"Beyond measurement. The apex has no ceiling." }
-];
-
-const KILL_POINTS = {
-  deer_buck:      10,
-  deer_doe:       5,
-  turkey_tom:     10,
-  turkey_jake:    5,
-  turkey_hen:     5,
-  bear:           15,
-  waterfowl:      2,
-  smallgame:      1,
-  coyote:         3,
-  wolf:           3,
-  fox:            3,
-  other:          2
-};
-
-function getTierForPoints(pts) {
-  let current = null;
-  for (const t of KILL_TIERS) {
-    if (pts >= t.pts) current = t;
-  }
-  return current;
-}
-
-function getNextTier(pts) {
-  return KILL_TIERS.find(t => pts < t.pts) || null;
-}
-
-async function updateKillCounter() {
-  if (!userProfile) return;
-  try {
-    const snap = await getDoc(doc(db, "users", userProfile.uid));
-    const data = snap.data() || {};
-    const kills = data.totalKills || 0;
-    const pts   = data.killPoints || 0;
-    const tier  = getTierForPoints(pts);
-
-    // Update header badge
-    const badge = document.getElementById("kill-counter-badge");
-    if (badge) {
-      badge.textContent = `${tier ? tier.icon + " " : "🏆 "}${kills}`;
-    }
-  } catch(err) { console.error("Kill counter error:", err); }
-}
-
-async function recordKill(harvestData) {
-  if (!userProfile) return;
-  try {
-    const ref2  = doc(db, "users", userProfile.uid);
-    const snap  = await getDoc(ref2);
-    const data  = snap.data() || {};
-    const prevPts  = data.killPoints  || 0;
-    const prevKills = data.totalKills || 0;
-
-    // Calculate points for this harvest
-    let pts = 0;
-    const sp = harvestData.species;
-    if (sp === "deer") {
-      pts = harvestData.deerType === "buck" ? KILL_POINTS.deer_buck : KILL_POINTS.deer_doe;
-    } else if (sp === "turkey") {
-      const sex = harvestData.turkeySex || "tom";
-      pts = sex === "tom" ? KILL_POINTS.turkey_tom : KILL_POINTS.turkey_jake;
-    } else if (sp === "bear")      pts = KILL_POINTS.bear;
-    else if (sp === "waterfowl")   pts = KILL_POINTS.waterfowl * (harvestData.quantity || 1);
-    else if (sp === "smallgame")   pts = KILL_POINTS.smallgame * (harvestData.quantity || 1);
-    else if (sp === "coyote")      pts = KILL_POINTS.coyote;
-    else if (sp === "wolf")        pts = KILL_POINTS.wolf;
-    else if (sp === "fox")         pts = KILL_POINTS.fox;
-    else                            pts = KILL_POINTS.other;
-
-    const newPts   = prevPts  + pts;
-    const newKills = prevKills + 1;
-
-    await updateDoc(ref2, {
-      killPoints:  newPts,
-      totalKills:  newKills,
-      updatedAt:   serverTimestamp()
-    });
-
-    // Store on userProfile for immediate use in feed flair
-    userProfile.killPoints = newPts;
-    userProfile.totalKills = newKills;
-
-    // Check tier progression
-    const prevTier = getTierForPoints(prevPts);
-    const newTier  = getTierForPoints(newPts);
-
-    if (newTier && (!prevTier || newTier.tier > prevTier.tier)) {
-      showTierPopup(newTier, newPts);
-      // Post to feed
-      await postAutoFeedEvent("tier", {
-        memberName: userProfile.displayName,
-        tierName:   newTier.name,
-        tierIcon:   newTier.icon,
-        uid:        userProfile.uid,
-        color:      userProfile.color,
-        initials:   userProfile.initials
-      });
-    }
-
-    updateKillCounter();
-  } catch(err) { console.error("Record kill error:", err); }
-}
-
-function showTierPopup(tier, currentPts) {
-  const next = getNextTier(currentPts);
-  const ov   = document.createElement("div");
-  ov.className = "modal-overlay";
-  ov.id = "tier-popup";
-  ov.innerHTML = `
-    <div class="modal-box" style="max-width:340px;text-align:center">
-      <div style="font-size:52px;margin-bottom:8px">${tier.icon}</div>
-      <div style="font-family:var(--font-serif);font-size:22px;color:var(--gold);margin-bottom:8px">
-        ${tier.name}
-      </div>
-      <div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:16px">
-        ${tier.msg}
-      </div>
-      ${next ? `
-        <div style="background:rgba(255,255,255,0.04);border:1px solid var(--card-border);
-                    border-radius:var(--radius-md);padding:10px 14px;margin-bottom:16px">
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Next Rank</div>
-          <div style="font-size:15px;color:var(--text-warm)">${next.icon} ${next.name} — ${next.pts} pts</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${next.pts - currentPts} pts away</div>
-        </div>` : `
-        <div style="font-size:13px;color:var(--gold);margin-bottom:16px">
-          Elementa Infinitum. There is no rank above this.
-        </div>`}
-      <button class="btn btn-primary btn-full" onclick="document.getElementById('tier-popup').remove()">
-        Let's Go 🎯
-      </button>
-    </div>
-  `;
-  document.body.appendChild(ov);
-}
 
 // ============================================================
 // HOME SCREEN — CHECK-IN BUTTON
@@ -6467,7 +6276,6 @@ function seasonBannerHTML(post) {
     <div style="display:flex;align-items:center;gap:10px;background:rgba(196,169,106,0.12);
                 border:1px solid var(--gold-dim);border-radius:var(--radius-md);
                 padding:10px 14px;margin-bottom:8px">
-      <span style="font-size:18px;flex-shrink:0">${post.seasonIcon || "📆"}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;color:var(--text-warm)">
           <strong>${esc(post.seasonLabel)}</strong> ${kindText}
@@ -6647,10 +6455,6 @@ function feedPostCard(post) {
   const isMine    = userProfile && userProfile.uid === post.uid;
   const tint      = safeColor(post.color);
 
-  // Regular user posts (auto-notification posts live in the bell now, not the feed)
-  const posterTier = getTierForPoints(post.killPoints || 0);
-  const tierFlair   = posterTier ? `<span style="font-size:11px;margin-left:2px" title="${posterTier.name}">${posterTier.icon}</span>` : "";
-
   const commentCount = comments.length;
   const reactionText = Object.entries(reactions)
     .filter(([e, users]) => REACTIONS_LIST.includes(e) && Object.keys(users || {}).length > 0)
@@ -6673,7 +6477,7 @@ function feedPostCard(post) {
 
           <div style="display:flex;${isMine ? "flex-direction:row-reverse" : ""};align-items:center;gap:8px;
                       font-size:10px;color:var(--text-dim);margin-top:3px">
-            ${!isMine ? `<span style="font-weight:600;color:var(--text-warm)">${esc(post.memberName || "Member")}${tierFlair} ·</span>` : ""}
+            ${!isMine ? `<span style="font-weight:600;color:var(--text-warm)">${esc(post.memberName || "Member")} ·</span>` : ""}
             <span>${dateStr}</span>
             ${reactionText}
             <span onclick="toggleFeedReactPicker('${post.id}')" style="cursor:pointer">😊</span>
@@ -6798,8 +6602,6 @@ window.submitFeedPost = async function () {
       memberName:  userProfile.displayName,
       initials:    userProfile.initials,
       color:       userProfile.color,
-      killPoints:  userProfile.killPoints || 0,
-      totalKills:  userProfile.totalKills || 0,
       createdAt:   serverTimestamp(),
       reactions:   {},
       comments:    []
@@ -6879,7 +6681,7 @@ function ordinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 function emptyMemberStats(uid) {
-  return { uid, harvests: 0, bucks: 0, does: 0, points: 0, heaviest: 0, bestRack: 0,
+  return { uid, harvests: 0, bucks: 0, does: 0, heaviest: 0, bestRack: 0,
            widestRack: 0, mostPoints: 0, heaviestBuck: 0,
            longestBeard: 0, longestSpur: 0, turkeys: 0, heaviestTurkey: 0,
            bears: 0, heaviestBear: 0, waterfowl: 0, smallgame: 0,
@@ -6899,7 +6701,6 @@ function computeTrophyStats(cache) {
     const m = ensure(h.uid);
     const y = harvestYear(h);
     m.harvests += 1;
-    m.points   += computeKillPoints(h);
     if (isBuck(h)) { m.bucks++; m.bucksByYear[y] = (m.bucksByYear[y] || 0) + 1; }
     if (isDoe(h))  { m.does++; }
     const w = Number(h.weight) || 0;
@@ -6946,7 +6747,6 @@ function computeTrophyStats(cache) {
     harvests:   rank(m => m.harvests),
     bucks:      rank(m => m.bucks),
     does:       rank(m => m.does),
-    points:     rank(m => m.points),
     heaviest:   rank(m => m.heaviest),
     bestRack:   rank(m => m.bestRack),
     widestRack: rank(m => m.widestRack),
@@ -7042,16 +6842,16 @@ function computeCampStats(cache) {
   const per = {};
   const ensure = uid => per[uid] || (per[uid] = {
     harvests: 0, years: new Set(), speciesSet: new Set(),
-    buckScores: [], points: 0, lastMs: 0, weekCounts: {}
+    buckScores: [], lastMs: 0, weekCounts: {}
   });
 
   const bySpecies = {}, byDay = {}, byYear = {}, waterfowlTypes = {}, smallgameTypes = {}, bearColors = {};
   const byMonth = Array(12).fill(0);
-  const yearPoints = {}, doesByDay = {}, doesByYear = {}, doesByUidYear = {}, grouseByUidYear = {};
-  const uidDayQty = {}, uidDayPoints = {}, daySpecies = {};
+  const doesByDay = {}, doesByYear = {}, doesByUidYear = {}, grouseByUidYear = {};
+  const uidDayQty = {}, daySpecies = {};
   const turkeySexCounts = { tom: 0, jake: 0, hen: 0 };
   let bucksCount = 0, doesCount = 0, firearmBucks = 0, bowBucks = 0, gunDeer = 0, bowDeer = 0;
-  let totalWeight = 0, totalAntlerScore = 0, totalPoints = 0;
+  let totalWeight = 0, totalAntlerScore = 0;
   let heaviestBuckRec = null, widestRackRec = null, heaviestTurkeyRec = null, heaviestBearRec = null;
   let earliestCalDay = null, latestCalDay = null;
 
@@ -7059,18 +6859,14 @@ function computeCampStats(cache) {
     const uid = h.uid, m = ensure(uid);
     const ms = harvestMillis(h), d = new Date(ms), y = harvestYear(h);
     const dayKey = d.toISOString().slice(0, 10);
-    const pts = computeKillPoints(h);
     const w = Number(h.weight) || 0;
     const qty = Number(h.quantity) || 1;
     const dateStr = formatDate(h.harvestDate);
 
     m.harvests++; m.years.add(y); m.speciesSet.add(h.species);
     m.lastMs = Math.max(m.lastMs, ms);
-    m.points += pts; totalPoints += pts;
     m.weekCounts[weekKeyOf(d)] = (m.weekCounts[weekKeyOf(d)] || 0) + 1;
-    yearPoints[uid + "_" + y] = (yearPoints[uid + "_" + y] || 0) + pts;
-    uidDayQty[uid + "_" + dayKey]    = (uidDayQty[uid + "_" + dayKey]    || 0) + qty;
-    uidDayPoints[uid + "_" + dayKey] = (uidDayPoints[uid + "_" + dayKey] || 0) + pts;
+    uidDayQty[uid + "_" + dayKey] = (uidDayQty[uid + "_" + dayKey] || 0) + qty;
     (daySpecies[dayKey] = daySpecies[dayKey] || new Set()).add(h.species);
 
     const md = d.getMonth() * 100 + d.getDate();
@@ -7145,14 +6941,6 @@ function computeCampStats(cache) {
     if (days > 0 && (!dryLeader || days > dryLeader.days)) dryLeader = { uid, days };
   });
 
-  let yearPtsLeader = null;
-  Object.entries(yearPoints).forEach(([key, pts]) => {
-    if (!yearPtsLeader || pts > yearPtsLeader.pts) {
-      const us = key.lastIndexOf("_");
-      yearPtsLeader = { uid: key.slice(0, us), year: key.slice(us + 1), pts };
-    }
-  });
-
   let avgBuckLeader = null;
   ids.forEach(uid => {
     const scores = per[uid].buckScores;
@@ -7177,14 +6965,6 @@ function computeCampStats(cache) {
     if (qty > 1 && (!bagLeader || qty > bagLeader.qty)) {
       const us = key.lastIndexOf("_");
       bagLeader = { uid: key.slice(0, us), dayKey: key.slice(us + 1), qty };
-    }
-  });
-
-  let dayPtsLeader = null;
-  Object.entries(uidDayPoints).forEach(([key, pts]) => {
-    if (!dayPtsLeader || pts > dayPtsLeader.pts) {
-      const us = key.lastIndexOf("_");
-      dayPtsLeader = { uid: key.slice(0, us), dayKey: key.slice(us + 1), pts };
     }
   });
 
@@ -7222,13 +7002,12 @@ function computeCampStats(cache) {
   const fmtDayKey = k => formatDate(new Date(k + "T12:00:00"));
 
   return {
-    total: harvests.length, speciesLine, totalWeight, totalAntlerScore, totalPoints,
+    total: harvests.length, speciesLine, totalWeight, totalAntlerScore,
     totalMembers: Object.keys(members).length, activeMembers: ids.length,
     heaviestBuck: heaviestBuckRec && { name: nameOf(heaviestBuckRec), ...heaviestBuckRec },
     widestRack:   widestRackRec   && { name: nameOf(widestRackRec),   ...widestRackRec },
     heaviestTurkey: heaviestTurkeyRec && { name: nameOf(heaviestTurkeyRec), ...heaviestTurkeyRec },
     heaviestBear:   heaviestBearRec   && { name: nameOf(heaviestBearRec),   ...heaviestBearRec },
-    yearPtsLeader: yearPtsLeader && { ...yearPtsLeader, name: nm(yearPtsLeader.uid) },
     avgBuckLeader: avgBuckLeader && { ...avgBuckLeader, name: nm(avgBuckLeader.uid) },
     slamLeader:    slamLeader    && { ...slamLeader,    name: nm(slamLeader.uid), of: SLAM_SPECIES.length },
     streakLeader:  streakLeader  && { ...streakLeader,  name: nm(streakLeader.uid) },
@@ -7236,7 +7015,6 @@ function computeCampStats(cache) {
     weekLeader:    weekLeader    && { ...weekLeader,    name: nm(weekLeader.uid) },
     grouseHunter:  grouseHunter  && { name: nm(grouseHunter.uid), year: grouseHunter.key2, count: grouseHunter.val },
     bagLeader:     bagLeader     && { name: nm(bagLeader.uid), qty: bagLeader.qty, date: fmtDayKey(bagLeader.dayKey) },
-    dayPtsLeader:  dayPtsLeader  && { name: nm(dayPtsLeader.uid), pts: dayPtsLeader.pts, date: fmtDayKey(dayPtsLeader.dayKey) },
     doeDay:  doeDayEntry  && { date: fmtDayKey(doeDayEntry[0]), count: doeDayEntry[1] },
     doeYear: doeYearEntry && { year: doeYearEntry[0], count: doeYearEntry[1] },
     doeYearHunter: doeYearHunter && { name: nm(doeYearHunter.uid), year: doeYearHunter.key2, count: doeYearHunter.val },
@@ -7262,7 +7040,6 @@ function campStatsHTML(cs) {
   const totals = [`<strong>${cs.total}</strong> animal${cs.total === 1 ? "" : "s"} taken at camp, all-time — ${cs.speciesLine}`];
   if (cs.totalWeight > 0) totals.push(`<strong>${Math.round(cs.totalWeight)} lbs</strong> combined, everything ever brought back to camp`);
   if (cs.totalAntlerScore > 0) totals.push(`<strong>${cs.totalAntlerScore.toFixed(1)}"</strong> of antler, stacked across every buck ever scored`);
-  if (cs.totalPoints > 0) totals.push(`<strong>${cs.totalPoints}</strong> kill points earned by the whole camp, combined`);
   totals.push(`<strong>${cs.activeMembers}</strong> of ${cs.totalMembers} member${cs.totalMembers === 1 ? "" : "s"} ha${cs.activeMembers === 1 ? "s" : "ve"} put something on the board`);
   sections.push(["Camp Totals", totals]);
 
@@ -7271,8 +7048,6 @@ function campStatsHTML(cs) {
   if (cs.widestRack)   records.push(`Widest rack on record: <strong>${esc(cs.widestRack.name)}</strong>, ${cs.widestRack.value}" spread — taken ${esc(cs.widestRack.date)}`);
   if (cs.heaviestTurkey) records.push(`Heaviest turkey on record: <strong>${esc(cs.heaviestTurkey.name)}</strong>, ${cs.heaviestTurkey.value} lbs — taken ${esc(cs.heaviestTurkey.date)}`);
   if (cs.heaviestBear)   records.push(`Heaviest bear on record: <strong>${esc(cs.heaviestBear.name)}</strong>, ${cs.heaviestBear.value} lbs — taken ${esc(cs.heaviestBear.date)}`);
-  if (cs.yearPtsLeader)  records.push(`Most kill points in one year: <strong>${esc(cs.yearPtsLeader.name)}</strong>, ${cs.yearPtsLeader.pts} pts in ${cs.yearPtsLeader.year}`);
-  if (cs.dayPtsLeader)   records.push(`Most kill points in one day: <strong>${esc(cs.dayPtsLeader.name)}</strong>, ${cs.dayPtsLeader.pts} pts on ${esc(cs.dayPtsLeader.date)}`);
   if (cs.avgBuckLeader)  records.push(`Best average buck score (2+ bucks): <strong>${esc(cs.avgBuckLeader.name)}</strong>, ${cs.avgBuckLeader.avg.toFixed(1)}" B&C average`);
   if (cs.slamLeader)     records.push(`Camp's most versatile hunter: <strong>${esc(cs.slamLeader.name)}</strong> has taken ${cs.slamLeader.count} of ${cs.slamLeader.of} trackable species`);
   if (cs.grouseHunter)   records.push(`Most grouse in one season: <strong>${esc(cs.grouseHunter.name)}</strong>, ${cs.grouseHunter.count} in ${cs.grouseHunter.year}`);
@@ -7407,30 +7182,6 @@ function trophyStatCard(c) {
     </div>`;
 }
 
-function pointsReferenceHTML(pts) {
-  return `
-    <div style="margin-bottom:14px">
-      <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Tier ladder</div>
-      ${KILL_TIERS.map(t => `
-        <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(196,169,106,0.07)">
-          <span style="font-size:16px;min-width:32px">${t.icon}</span>
-          <div style="flex:1"><div style="font-size:13px;font-weight:600;color:${pts >= t.pts ? "var(--gold)" : "var(--text-warm)"}">${t.name}</div></div>
-          <div style="font-size:12px;color:var(--text-muted)">${t.pts} pts</div>
-          ${pts >= t.pts ? `<span style="font-size:11px;color:var(--success)">✓</span>` : ""}
-        </div>`).join("")}
-    </div>
-    <div>
-      <div style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Points per kill</div>
-      ${[["🦌 Buck deer", 10], ["🦌 Doe deer", 5], ["🦃 Turkey tom", 10], ["🦃 Jake / hen", 5],
-         ["🐻 Bear", 15], ["🦆 Waterfowl", "2/bird"], ["🐿️ Small game", "1/animal"], ["🎯 Other", 2]
-        ].map(([label, p]) => `
-        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(196,169,106,0.07)">
-          <span style="font-size:13px;color:var(--text-muted)">${label}</span>
-          <span style="font-size:13px;color:var(--gold);font-weight:600">${p}</span>
-        </div>`).join("")}
-    </div>`;
-}
-
 window.renderTrophyRoom = async function () {
   const content = document.getElementById("mykills-content");
   if (!content) return;
@@ -7456,26 +7207,6 @@ window.renderTrophyRoom = async function () {
       return i < 0 ? null : { pos: i + 1, total: list.length, ahead: list.slice(0, i) };
     };
     const cards = [];
-
-    // Rank & points
-    const pts = me.points || 0;
-    const tier = getTierForPoints(pts), nextTier = getNextTier(pts);
-    const ptsRank = rankOf(stats.rankings.points);
-    cards.push({
-      _rank: ptsRank ? ptsRank.pos : 90, hasData: pts > 0, title: "Rank & points",
-      rank: ptsRank, trophy: !!(ptsRank && ptsRank.pos === 1),
-      value: tier ? tier.icon + " " + tier.name : "No rank yet",
-      sub: pts + " kill points",
-      chart: nextTier ? `<div style="margin:4px 0 8px">
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:4px">
-          <span>next: ${nextTier.icon} ${esc(nextTier.name)}</span><span>${pts} / ${nextTier.pts}</span>
-        </div>
-        <div style="background:rgba(255,255,255,0.08);border-radius:8px;height:6px;overflow:hidden">
-          <div style="height:100%;width:${Math.min(100, Math.round(pts / nextTier.pts * 100))}%;
-               background:linear-gradient(135deg,var(--orange),var(--orange-bright))"></div>
-        </div></div>` : (pts > 0 ? `<div style="font-size:11px;color:var(--gold);margin-bottom:6px">Top of the ladder.</div>` : ""),
-      context: trophyContextLine(ptsRank, " pts", M), badges: []
-    });
 
     // Total harvests
     const hRank = rankOf(stats.rankings.harvests);
@@ -7550,7 +7281,7 @@ window.renderTrophyRoom = async function () {
       cards.push({
         _rank: beardRank ? beardRank.pos : 65, hasData: me.longestBeard > 0 || turkeyBadges.length > 0,
         title: "Turkey", rank: beardRank, trophy: !!(beardRank && beardRank.pos === 1),
-        value: me.longestBeard ? me.longestBeard + '" beard' : (turkeyBadges.length ? "🦃" : "—"),
+        value: me.longestBeard ? me.longestBeard + '" beard' : (turkeyBadges.length ? "placed" : "—"),
         sub: me.longestBeard ? "your longest" : "",
         chart: "", context: trophyContextLine(beardRank, '"', M), badges: turkeyBadges
       });
@@ -7594,7 +7325,6 @@ window.renderTrophyRoom = async function () {
     if (stats.rankings.bucks[0]?.uid === uid)    records.push("most bucks");
     if (stats.allBucks[0]?.uid === uid)          records.push("biggest buck");
     if (stats.rankings.heaviest[0]?.uid === uid) records.push("heaviest animal");
-    if (stats.rankings.points[0]?.uid === uid)   records.push("most points");
     if (stats.rankings.beard[0]?.uid === uid)    records.push("longest beard");
     if (records.length) {
       cards.push({
@@ -7610,7 +7340,6 @@ window.renderTrophyRoom = async function () {
     const highlights = [];
     if (records.length) highlights.push(records.length + (records.length === 1 ? " camp record" : " camp records"));
     if (bRank && bRank.pos <= 3) highlights.push("#" + bRank.pos + " for bucks");
-    if (tier) highlights.push(tier.name);
     const heroLine = highlights.length ? highlights.join(" · ")
       : (me.harvests ? me.harvests + " trophies logged" : "empty room — go fill a tag");
 
@@ -7628,8 +7357,8 @@ window.renderTrophyRoom = async function () {
         </div>
 
         <div style="display:flex;gap:8px;margin-bottom:16px">
-          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goHarvest()">🦌 Harvest log</button>
-          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goMasterTrophyRoom()">🏅 Cabin Trophy Room</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goHarvest()">Harvest log</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="goMasterTrophyRoom()">Cabin Trophy Room</button>
         </div>
 
         ${me.harvests ? cards.map(trophyStatCard).join("") : `
@@ -7642,7 +7371,6 @@ window.renderTrophyRoom = async function () {
         ${trophyEntries.length ? `
           <div style="margin-top:6px">
             <button class="tc-row-header" id="troom-log-toggle" onclick="toggleTrophySection('troom-log')" style="margin-bottom:0">
-              <span style="font-size:16px">🦌</span>
               <div style="flex:1;text-align:left">
                 <div style="font-size:14px;font-weight:600;color:var(--text-warm)">Your harvest log</div>
                 <div style="font-size:12px;color:var(--text-muted)">${trophyEntries.length} ${trophyEntries.length === 1 ? "entry" : "entries"}</div>
@@ -7653,22 +7381,6 @@ window.renderTrophyRoom = async function () {
               ${trophyEntries.map(renderTrophyEntry).join("")}
             </div>
           </div>` : ""}
-
-        <div style="margin-top:8px">
-          <button class="tc-row-header" id="troom-pts-toggle" onclick="toggleTrophySection('troom-pts')" style="margin-bottom:0">
-            <span style="font-size:16px">📈</span>
-            <div style="flex:1;text-align:left">
-              <div style="font-size:14px;font-weight:600;color:var(--text-warm)">How points work</div>
-              <div style="font-size:12px;color:var(--text-muted)">Tiers and point values</div>
-            </div>
-            <span id="troom-pts-arrow" style="color:var(--gold);font-size:18px;transition:transform 0.2s">›</span>
-          </button>
-          <div id="troom-pts-content" class="hidden"
-            style="background:rgba(14,10,4,0.92);border:1px solid var(--gold-dim);border-top:none;
-                   border-bottom-left-radius:var(--radius-lg);border-bottom-right-radius:var(--radius-lg);padding:14px">
-            ${pointsReferenceHTML(pts)}
-          </div>
-        </div>
       </div>`;
   } catch (err) {
     console.error(err);
@@ -7711,12 +7423,12 @@ window.renderMasterTrophyRoom = async function () {
                    border-radius:12px;padding:12px 14px;margin-bottom:10px">
         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin-bottom:8px">${esc(label)}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:${second ? "5px" : "0"}">
-          <span style="font-size:15px">🏆</span>
+          <span style="font-size:11px;color:var(--text-dim);min-width:14px">1.</span>
           <span style="flex:1;font-size:14px;font-weight:600;color:var(--gold);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${first ? nm(first.uid) : "—"}</span>
           <span style="font-size:13px;color:var(--text-warm);flex-shrink:0">${first ? esc(f(first.value)) : ""}</span>
         </div>
         ${second ? `<div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:15px">🥈</span>
+          <span style="font-size:11px;color:var(--text-dim);min-width:14px">2.</span>
           <span style="flex:1;font-size:13px;color:var(--text-muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${nm(second.uid)}</span>
           <span style="font-size:12px;color:var(--text-dim);flex-shrink:0">${esc(f(second.value))}</span>
         </div>` : ""}
@@ -7724,27 +7436,26 @@ window.renderMasterTrophyRoom = async function () {
     };
 
     const allCats = [
-      ["🏆", "Most trophies",              stats.rankings.harvests,      ""],
-      ["⭐",  "Most kill points",           stats.rankings.points,        " pts"],
-      ["📅", "Best single season",         stats.rankings.bestSeason,    ""],
-      ["🦌", "Most bucks",                 stats.rankings.bucks,         ""],
-      ["🦌", "Most does",                  stats.rankings.does,          ""],
-      ["🎯", "Biggest Rack (B&C Score)",   stats.rankings.bestRack,      '"'],
-      ["📏", "Widest Rack (Spread)",       stats.rankings.widestRack,    '"'],
-      ["🔟", "Most Antler Points",         stats.rankings.mostPoints,    " pts"],
-      ["⚖️", "Heaviest Buck",              stats.rankings.heaviestBuck,  " lbs"],
-      ["🦃", "Most Turkeys",               stats.rankings.turkeys,       ""],
-      ["🦃", "Longest Beard",              stats.rankings.beard,         '"'],
-      ["🦃", "Longest Spurs",              stats.rankings.spur,          '"'],
-      ["🦃", "Heaviest Turkey",            stats.rankings.heaviestTurkey," lbs"],
-      ["🐻", "Most Bears",                 stats.rankings.bears,         ""],
-      ["🐻", "Heaviest Bear",              stats.rankings.heaviestBear,  " lbs"],
-      ["🦆", "Most Waterfowl",             stats.rankings.waterfowl,     ""],
-      ["🐇", "Most Small Game",            stats.rankings.smallgame,     ""],
-      ["⚖️", "Heaviest Animal (Any Species)", stats.rankings.heaviest,   " lbs"]
+      ["Most trophies",              stats.rankings.harvests,      ""],
+      ["Best single season",         stats.rankings.bestSeason,    ""],
+      ["Most bucks",                 stats.rankings.bucks,         ""],
+      ["Most does",                  stats.rankings.does,          ""],
+      ["Biggest Rack (B&C Score)",   stats.rankings.bestRack,      '"'],
+      ["Widest Rack (Spread)",       stats.rankings.widestRack,    '"'],
+      ["Most Antler Points",         stats.rankings.mostPoints,    " pts"],
+      ["Heaviest Buck",              stats.rankings.heaviestBuck,  " lbs"],
+      ["Most Turkeys",               stats.rankings.turkeys,       ""],
+      ["Longest Beard",              stats.rankings.beard,         '"'],
+      ["Longest Spurs",              stats.rankings.spur,          '"'],
+      ["Heaviest Turkey",            stats.rankings.heaviestTurkey," lbs"],
+      ["Most Bears",                 stats.rankings.bears,         ""],
+      ["Heaviest Bear",              stats.rankings.heaviestBear,  " lbs"],
+      ["Most Waterfowl",             stats.rankings.waterfowl,     ""],
+      ["Most Small Game",            stats.rankings.smallgame,     ""],
+      ["Heaviest Animal (Any Species)", stats.rankings.heaviest,   " lbs"]
     ];
-    const cats      = allCats.filter(([, , list]) => list.length);
-    const unclaimed = allCats.filter(([, , list]) => !list.length);
+    const cats      = allCats.filter(([, list]) => list.length);
+    const unclaimed = allCats.filter(([, list]) => !list.length);
 
     const contestRows = [];
     const claimedContestKeys = new Set();
@@ -7771,23 +7482,21 @@ window.renderMasterTrophyRoom = async function () {
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">
           The champion and the runner-up in every category. Updates as members log harvests.
         </div>
-        ${cats.length ? cats.map(([, l, list, u]) => row(l, list, u)).join("")
+        ${cats.length ? cats.map(([l, list, u]) => row(l, list, u)).join("")
           : `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:20px 0;text-align:center">No harvests logged at camp yet.</div>`}
         ${contestRows.length ? `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:18px 0 8px">Contest champions</div>${contestRows.join("")}` : ""}
         ${unclaimed.length || unclaimedContests.length ? `
           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:18px 0 8px">Not claimed yet</div>
           <div style="background:var(--forest-card);border:1px dashed var(--card-border);border-radius:12px;padding:4px 14px">
-            ${unclaimed.map(([icon, l], i) => `
+            ${unclaimed.map(([l], i) => `
               <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
                           ${i === unclaimed.length - 1 && !unclaimedContests.length ? "" : "border-bottom:1px solid var(--card-border)"}">
-                <span style="font-size:15px;opacity:0.6">${icon}</span>
                 <span style="flex:1;font-size:13px;color:var(--text-muted)">${esc(l)}</span>
                 <span style="font-size:11px;color:var(--text-dim);font-style:italic">no one yet</span>
               </div>`).join("")}
             ${unclaimedContests.map(([, c], i) => `
               <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
                           ${i === unclaimedContests.length - 1 ? "" : "border-bottom:1px solid var(--card-border)"}">
-                <span style="font-size:15px;opacity:0.6">${c.icon}</span>
                 <span style="flex:1;font-size:13px;color:var(--text-muted)">${esc(c.label)}</span>
                 <span style="font-size:11px;color:var(--text-dim);font-style:italic">not closed yet</span>
               </div>`).join("")}
@@ -7825,7 +7534,6 @@ function renderTrophyEntry(h) {
     <div style="margin-bottom:${isExp?"2":"8"}px">
       <button class="tc-row-header ${isExp?"expanded":""}"
         onclick="toggleTrophyEntry('${h.id}')" style="margin-bottom:0">
-        <span style="font-size:28px;flex-shrink:0">${sp.icon}</span>
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600;color:var(--text-warm)">${sp.label}</div>
           <div style="font-size:11px;color:var(--text-muted)">${dateStr}</div>
