@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.23.0";
+const APP_VERSION = "lite-2.24.0";
 
 
 
@@ -965,8 +965,8 @@ function renderHomeCalendarCard(el) {
         <button class="cal-nav-btn" onclick="calNextMonth()">›</button>
       </div>
       <div class="home-cal-chips">
-        <span class="weather-pill" id="weather-strip">⏳ Loading weather…</span>
-        <span class="weather-pill" title="${esc(moon.name)}">${moon.icon} ${esc(moon.name)}</span>
+        <span class="weather-pill" id="weather-strip">Loading weather…</span>
+        <span class="weather-pill">${esc(moon.name)}</span>
       </div>
       <div class="dow-row">${CAL_DAYS.map(d => `<div>${d[0]}</div>`).join("")}</div>
       <div class="home-cal-grid">${monthGridCellsHTML(year, month, "sm")}</div>
@@ -1054,7 +1054,7 @@ async function fetchWeather() {
     const dir  = windDir(cur.wind_direction_10m);
 
     document.getElementById("weather-strip").innerHTML =
-      `🌡️ ${temp}°F &nbsp;|&nbsp; 💨 ${wind} mph ${dir}`;
+      `${temp}°F &nbsp;|&nbsp; ${wind} mph ${dir}`;
   } catch {
     const el = document.getElementById("weather-strip");
     if (el) el.textContent = "Weather unavailable";
@@ -1574,6 +1574,10 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.24.0", date: "Sep 2026", notes: [
+      "Removed every icon from the Calendar — weather, moon phase, visit purpose, time of day, and multi-day stay tags are all plain text now",
+      "The \"headed up for\" and \"when are you coming\" calendar buttons are text-only, no icons"
+    ]},
     { version: "lite-2.23.0", date: "Sep 2026", notes: [
       "Removed the kill-points and tier system — no more kill counter, ranks, or tier-up popups. Harvest Log and Trophy Room are unchanged otherwise",
       "Removed animal icons throughout the app (Home, Harvest Log, Trophy Room, Contests, harvest form) — everything is now text-only, except the Notifications bell and message feed reactions"
@@ -5440,10 +5444,10 @@ const VISIT_PURPOSES = {
   visiting: { label: "Just visiting", icon: "👋", color: "#5a8fa8" }
 };
 const DAY_PARTS = {
-  morning:   { label: "Morning",   icon: "🌅" },
-  evening:   { label: "Evening",   icon: "🌆" },
-  allday:    { label: "All day",   icon: "☀️" },
-  overnight: { label: "Overnight", icon: "🌙" }
+  morning:   { label: "Morning" },
+  evening:   { label: "Evening" },
+  allday:    { label: "All day" },
+  overnight: { label: "Overnight" }
 };
 function visitPurpose(v)  { return VISIT_PURPOSES[v && v.purpose] || null; }
 function visitDayPart(v)  { return DAY_PARTS[v && v.dayPart] || null; }
@@ -5455,14 +5459,14 @@ function moonPhase(date) {
   const now = date.getTime() / 86400000;
   const frac = (((now - knownNew) % SYNODIC) + SYNODIC) % SYNODIC / SYNODIC;
   const table = [
-    { name: "New moon",        icon: "🌑" },
-    { name: "Waxing crescent", icon: "🌒" },
-    { name: "First quarter",   icon: "🌓" },
-    { name: "Waxing gibbous",  icon: "🌔" },
-    { name: "Full moon",       icon: "🌕" },
-    { name: "Waning gibbous",  icon: "🌖" },
-    { name: "Last quarter",    icon: "🌗" },
-    { name: "Waning crescent", icon: "🌘" }
+    { name: "New moon" },
+    { name: "Waxing crescent" },
+    { name: "First quarter" },
+    { name: "Waxing gibbous" },
+    { name: "Full moon" },
+    { name: "Waning gibbous" },
+    { name: "Last quarter" },
+    { name: "Waning crescent" }
   ];
   return table[Math.round(frac * 8) % 8];
 }
@@ -5518,7 +5522,7 @@ function wizardStepHTML(step) {
             style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:var(--radius-md);
                    background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);
                    font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:left">
-            <span style="font-size:19px">${m.icon}</span>${m.label}
+            ${m.label}
           </button>`).join("")}
       </div>
       <button type="button" onclick="calWizardPick('purpose',null)"
@@ -5537,7 +5541,7 @@ function wizardStepHTML(step) {
                    border-radius:var(--radius-md);background:rgba(255,255,255,0.05);
                    border:1px solid var(--card-border);color:var(--text-warm);font-size:12.5px;
                    font-weight:600;cursor:pointer;font-family:var(--font-sans)">
-            <span style="font-size:21px">${m.icon}</span>${m.label}
+            ${m.label}
           </button>`).join("")}
       </div>
       <button type="button" onclick="calWizardPick('dayPart',null)"
@@ -5807,8 +5811,8 @@ function renderCalendarGrid(el) {
                     </div>
                     ${visits.map(v => {
                       const p = visitPurpose(v), dp = visitDayPart(v);
-                      const spanTag = visitSpan(v) > 1 ? `📅 ${visitRangeLabel(v)}` : "";
-                      const tags = [p ? `${p.icon} ${p.label}` : "", dp ? `${dp.icon} ${dp.label}` : "", spanTag].filter(Boolean).join("  ·  ");
+                      const spanTag = visitSpan(v) > 1 ? visitRangeLabel(v) : "";
+                      const tags = [p ? p.label : "", dp ? dp.label : "", spanTag].filter(Boolean).join("  ·  ");
                       return `
                       <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
                         <div class="avatar" style="background:${safeColor(v.visitorColor)};
@@ -5869,9 +5873,9 @@ window.openCalendarDay = function (dateStr) {
     const span = visitSpan(v);
     const off  = visitDayOffset(v, dateStr);   // 0-based day of the stay
     const bits = [
-      dp ? `${dp.icon} ${dp.label}` : "",
-      span > 1 ? `📅 ${esc(visitRangeLabel(v))} · day ${off + 1} of ${span}` : "",
-      v.isCheckin ? "📍 checked in" : ""
+      dp ? dp.label : "",
+      span > 1 ? `${esc(visitRangeLabel(v))} · day ${off + 1} of ${span}` : "",
+      v.isCheckin ? "checked in" : ""
     ].filter(Boolean).join("  ·  ");
     return `
       <div style="display:flex;align-items:flex-start;gap:9px;padding:8px 9px;border-radius:var(--radius-md);
@@ -5904,7 +5908,7 @@ window.openCalendarDay = function (dateStr) {
       const m = VISIT_PURPOSES[k];
       const list = buckets[k];
       const head = m
-        ? `<span style="font-size:11px;background:${m.color}22;border:1px solid ${m.color}55;color:var(--text-warm);border-radius:20px;padding:2px 9px">${m.icon} ${m.label}</span>`
+        ? `<span style="font-size:11px;background:${m.color}22;border:1px solid ${m.color}55;color:var(--text-warm);border-radius:20px;padding:2px 9px">${m.label}</span>`
         : `<span style="font-size:11px;color:var(--text-muted)">Heading up — no plan set</span>`;
       return `<div style="margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
@@ -5939,14 +5943,14 @@ window.openCalendarDay = function (dateStr) {
             <div style="font-size:12px;color:var(--text-warm);margin-top:2px">
               ${esc(rel)}${isWeekend ? " · weekend" : ""}
             </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px" title="${esc(moon.name)}">
-              ${moon.icon} ${esc(moon.name)}
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+              ${esc(moon.name)}
             </div>
           </div>
         </div>
         ${planLine ? `<div style="margin-top:12px;font-size:12px;color:var(--text-warm);
                       background:rgba(14,10,4,0.4);border-radius:20px;padding:5px 12px;display:inline-block">
-                      👥 ${esc(planLine)}</div>` : ""}
+                      ${esc(planLine)}</div>` : ""}
       </div>
 
       <div style="padding:16px 18px">
@@ -5962,7 +5966,6 @@ window.openCalendarDay = function (dateStr) {
 
         ${visits.length === 0
           ? `<div style="text-align:center;padding:14px 0 18px;color:var(--text-muted)">
-               <div style="font-size:30px;margin-bottom:6px">🪵</div>
                <div style="font-size:13px">Nobody's down for this day yet.</div>
              </div>`
           : `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
@@ -6058,7 +6061,7 @@ window.saveCalendarVisit = async function (dateStr) {
     showToast(
       spanDays > 1
         ? `You're on the calendar for ${spanDays} days.`
-        : purpose ? `${VISIT_PURPOSES[purpose].icon} You're on the calendar!` : "You're on the calendar!",
+        : "You're on the calendar!",
       "success"
     );
     await refreshAllCalendarViews();

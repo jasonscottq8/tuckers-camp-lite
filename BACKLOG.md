@@ -642,6 +642,44 @@ stay."
    passed the whole time since these were all valid-but-wrong references, not
    syntax errors.
 
+### Calendar icons removed — SHIPPED in lite-2.24.0
+
+Same session, immediate follow-up after the last batch shipped and deployed.
+User: "i want all the target emojis and calendar emoji graphics removed from
+the calendar, and, from the calendar as well, any graphic found in the stay
+length choices. i want buttons or pills with words, not words and graphics."
+Scoped to the Calendar screen only (home mini-calendar + full Calendar + day
+popup + the "add yourself" wizard) — the Notifications bell keeps its icons
+per the standing exception from the prior batch, and everything outside the
+calendar (admin panel, harvest wizard, feed reactions) was untouched.
+Stripped: the 🎯👀🔨🏡👋 icons from the wizard's "What are you headed up for?"
+purpose buttons and the day-popup roster's purpose badges (the 🎯 target
+emoji on Hunting was the specific one named); the 🌅🌆☀️🌙 icons from the
+wizard's "When are you coming?" day-part buttons and every place a visit's
+day-part shows as a tag; the 🌡️/💨 weather icons and the 🌑🌒🌓🌔🌕🌖🌗🌘 moon-phase
+icons from the home calendar card and the day-popup header (now just "72°F |
+5 mph N" and "First quarter" as plain text); the 👥 people icon from the "N
+members planning to be there" line; the 🪵 log icon from the day popup's empty
+state. **The "stay length" ask** turned out to be the 📅 calendar-emoji prefix
+on the multi-day range tag (`visitRangeLabel()`, e.g. "Sep 19 – 21 · day 1 of
+3") and the 📍 pin on the "checked in" tag — both appeared in the day popup's
+visitor cards and the month-list rows; both now render as plain text. The
+wizard's actual day-COUNT stepper ("How many days at camp?", the −/+ circle
+buttons) never had an icon to begin with — just math symbols — so nothing
+changed there, it already matched the "words, not words and graphics" ask.
+`DAY_PARTS`'s `icon` field was removed entirely from the config object (no
+remaining consumer anywhere, including the bell); `VISIT_PURPOSES`'s `icon`
+field was kept in the data (the Notifications bell's `notifCard` still reads
+it for calendar-visit notifications) — same icon-data-vs-icon-display split
+established in the lite-2.23.0 graphics sweep. `moonPhase()`'s icon field was
+dropped from its lookup table since nothing consumes it anymore. Verified via
+the established `window.__debugSetUser`/`__debugEnterApp` hooks plus a new
+temporary `__debugSetVisits` hook (seeds `calVisitList`/`calVisitDocs`
+directly so the day popup and month list render off fixture data instead of
+a live Firestore listener) — confirmed the home card, day-popup header,
+roster badges, and a multi-day checked-in visitor card all render icon-free
+text end to end; all three removed after.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
