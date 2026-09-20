@@ -31,6 +31,7 @@ import {
   serverTimestamp,
   Timestamp,
   deleteField,
+  increment,
   terminate,
   clearIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -44,7 +45,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.27.0";
+const APP_VERSION = "lite-2.28.0";
 
 
 
@@ -1626,6 +1627,10 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.28.0", date: "Sep 2026", notes: [
+      "Comments on harvests, trail cam photos, and feed posts now use a safer storage format under the hood — closes a gap where a member could have tampered with someone else's replies",
+      "Admins: a one-time \"Migrate Comments\" button in the admin panel moves existing comments to the new format"
+    ]},
     { version: "lite-2.27.0", date: "Sep 2026", notes: [
       "Security pass: photos can no longer be overwritten by anyone but their uploader, the camp sign-up code is now far harder to crack, and signing out clears cached camp data from this device"
     ]},
@@ -2833,8 +2838,68 @@ async function renderAdminContent(inner) {
       <button class="btn btn-secondary btn-full" onclick="adminViewAllTrailCam()">
         📷 View All Trail Cam Photos
       </button>
+      <div class="fade-divider-plain" style="margin:10px 0"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">
+        One-time tool: moves existing comments into the new per-comment
+        format. Safe to run more than once — anything already moved is
+        skipped, so it's fine to tap this and forget about it.
+      </div>
+      <button class="btn btn-secondary btn-full" onclick="adminMigrateComments()">
+        Migrate Comments to New Format
+      </button>
     </div>`;
 }
+
+// One-time migration: copies each harvest/trail-cam/feed post's old embedded
+// `comments` array into its new `comments` subcollection (one document per
+// comment, matching how the app now reads/writes them), sets a commentCount
+// to match, then clears the old array field. Idempotent — a post with no
+// `comments` array (never had any, or already migrated) is skipped, so this
+// is safe to tap again if it's interrupted partway through.
+window.adminMigrateComments = function () {
+  if (!userProfile || userProfile.role !== "admin") return;
+  appConfirm(
+    "Migrate Comments",
+    "Move every post's existing comments into the new format? This can take a moment on a camp with a lot of history. Safe to run again if it's interrupted.",
+    async () => {
+      showToast("Migrating comments…", "success");
+      let postsTouched = 0, commentsMoved = 0;
+      try {
+        for (const collName of ["harvests", "trailcam", "feed"]) {
+          const snap = await getDocs(collection(db, collName));
+          for (const d of snap.docs) {
+            const data = d.data();
+            const oldComments = data.comments;
+            if (!Array.isArray(oldComments) || oldComments.length === 0) continue;
+            for (const c of oldComments) {
+              await addDoc(collection(db, collName, d.id, "comments"), {
+                uid:      c.uid || null,
+                name:     c.name || "Member",
+                initials: c.initials || "?",
+                color:    c.color || "#556B2F",
+                text:     c.text || "",
+                createdAt: c.createdAt ? Timestamp.fromMillis(c.createdAt) : serverTimestamp()
+              });
+              commentsMoved++;
+            }
+            await updateDoc(doc(db, collName, d.id), {
+              comments: deleteField(),
+              commentCount: oldComments.length
+            });
+            postsTouched++;
+          }
+        }
+        await writeAdminLog("migrate_comments", null,
+          `Migrated ${commentsMoved} comments across ${postsTouched} posts`,
+          "Comments subcollection migration", null);
+        showToast(`Done — moved ${commentsMoved} comments across ${postsTouched} posts.`, "success");
+      } catch (err) {
+        console.error(err);
+        showToast("Migration hit an error partway through — check the console. Safe to run again.", "error");
+      }
+    }
+  );
+};
 
 window.adminViewAllPosts = async function () {
   const snap = await getDocs(query(collection(db, "feed"), orderBy("createdAt","desc"), limit(30)));
@@ -3469,6 +3534,10 @@ function renderHarvestList(snap, speciesFilter) {
       </div>
     `;
   }).join("");
+  // Comments live in a subcollection now, so any row already expanded when
+  // the list rebuilds (a live update from another member, a filter switch)
+  // needs its thread re-fetched — it isn't bundled into the harvest doc above.
+  docs.forEach(d => { if (expandedHarvests.has(d.id)) loadAndRenderComments(d.id, "harvests"); });
 }
 
 window.toggleHarvestRow = function (id) {
@@ -3482,6 +3551,7 @@ window.toggleHarvestRow = function (id) {
       harvestDetailData = { id, ...snap.data() };
       const panel = document.getElementById("hd-" + id);
       if (panel) panel.innerHTML = renderHarvestDetailInline(harvestDetailData);
+      loadAndRenderComments(id, "harvests");
     });
   }
   if (lastHarvestSnap) {
@@ -3557,7 +3627,7 @@ function renderHarvestDetailInline(h) {
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;
                     letter-spacing:0.5px;text-transform:uppercase">Comments</div>
         <div id="harvest-comments-${id}">
-          ${renderComments(h.comments || [], id, "harvests")}
+          <div class="spinner" style="margin:8px auto"></div>
         </div>
         ${userProfile ? `
           <div style="display:flex;gap:8px;margin-top:10px">
@@ -3673,22 +3743,40 @@ window.submitHarvestComment = async function (id) {
   const text  = input?.value.trim();
   if (!text) return;
   try {
-    const ref2     = doc(db, "harvests", id);
-    const snap     = await getDoc(ref2);
-    const comments = snap.data()?.comments || [];
-    comments.push({
+    await addDoc(collection(db, "harvests", id, "comments"), {
       uid: userProfile.uid, name: userProfile.displayName,
       initials: userProfile.initials, color: userProfile.color,
-      text, createdAt: Date.now()
+      text, createdAt: serverTimestamp()
     });
-    await updateDoc(ref2, { comments });
+    await updateDoc(doc(db, "harvests", id), { commentCount: increment(1) });
     if (input) input.value = "";
-    const fresh = await getDoc(ref2);
-    const wrap  = document.getElementById("harvest-comments-" + id);
-    if (wrap) wrap.innerHTML = renderComments(fresh.data()?.comments || [], id, "harvests");
+    await loadAndRenderComments(id, "harvests");
     showToast("Comment posted!", "success");
   } catch(err) { console.error(err); showToast("Could not post comment.", "error"); }
 };
+
+// Comments live in their own subcollection (parentColl/{id}/comments/{cid})
+// — each one its own document with its own uid, so normal ownership rules
+// apply with no array-diffing. Fetched fresh whenever a thread is shown or
+// changes, same as the rest of this app's non-realtime comment/reaction UI.
+async function loadAndRenderComments(docId, collName) {
+  try {
+    const q     = query(collection(db, collName, docId, "comments"), orderBy("createdAt", "asc"));
+    const snap  = await getDocs(q);
+    const comments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    refreshCommentsUI(docId, collName, comments);
+    return comments;
+  } catch (err) {
+    console.error(err);
+    const wrap = document.getElementById(
+      collName === "feed" ? "feed-comments-" + docId
+        : collName === "harvests" ? "harvest-comments-" + docId
+        : "tc-lb-comments"
+    );
+    if (wrap) wrap.innerHTML = `<div style="color:var(--danger);font-size:12px">Could not load comments.</div>`;
+    return [];
+  }
+}
 
 // Re-render a comment thread after it changes. Feed threads bundle the
 // comment list with the "add a comment" input in one wrapper; harvest/trail
@@ -3721,35 +3809,31 @@ function canTouchComment(comment) {
   return !!userProfile && !!comment && (comment.uid === userProfile.uid || userProfile.role === "admin");
 }
 
-window.deleteComment = async function (docId, collName, index) {
+window.deleteComment = async function (docId, collName, commentId) {
   appConfirm("Delete Comment", "Remove this comment?", async () => {
     try {
-      const ref2     = doc(db, collName, docId);
-      const snap     = await getDoc(ref2);
-      const comments = snap.data()?.comments || [];
-      if (!canTouchComment(comments[index])) { showToast("You can only delete your own comments.", "error"); return; }
-      comments.splice(index, 1);
-      await updateDoc(ref2, { comments });
-      refreshCommentsUI(docId, collName, comments);
+      const cRef = doc(db, collName, docId, "comments", commentId);
+      const snap = await getDoc(cRef);
+      if (!canTouchComment(snap.data())) { showToast("You can only delete your own comments.", "error"); return; }
+      await deleteDoc(cRef);
+      await updateDoc(doc(db, collName, docId), { commentCount: increment(-1) });
+      await loadAndRenderComments(docId, collName);
     } catch(err) { console.error(err); showToast("Could not delete comment.", "error"); }
   });
 };
 
-window.editComment = async function (docId, collName, index) {
-  const ref2   = doc(db, collName, docId);
-  const snap   = await getDoc(ref2);
-  const comments0 = snap.data()?.comments || [];
-  if (!canTouchComment(comments0[index])) { showToast("You can only edit your own comments.", "error"); return; }
-  const current = comments0[index]?.text || "";
+window.editComment = async function (docId, collName, commentId) {
+  const cRef = doc(db, collName, docId, "comments", commentId);
+  const snap = await getDoc(cRef);
+  if (!canTouchComment(snap.data())) { showToast("You can only edit your own comments.", "error"); return; }
+  const current = snap.data()?.text || "";
   appPrompt("Edit Comment", current, async (newText) => {
     if (!newText) return;
     try {
-      const fresh    = await getDoc(ref2);
-      const comments = fresh.data()?.comments || [];
-      if (!canTouchComment(comments[index])) { showToast("You can only edit your own comments.", "error"); return; }
-      comments[index].text = newText;
-      await updateDoc(ref2, { comments });
-      refreshCommentsUI(docId, collName, comments);
+      const fresh = await getDoc(cRef);
+      if (!canTouchComment(fresh.data())) { showToast("You can only edit your own comments.", "error"); return; }
+      await updateDoc(cRef, { text: newText });
+      await loadAndRenderComments(docId, collName);
     } catch(err) { console.error(err); showToast("Could not edit comment.", "error"); }
   });
 };
@@ -3777,7 +3861,7 @@ function renderReactionBadges(reactions, docId, collName) {
 function renderComments(comments, docId, collName) {
   if (!comments || comments.length === 0)
     return `<div style="color:var(--text-dim);font-size:13px;font-style:italic">No comments yet.</div>`;
-  return comments.map((c, i) => {
+  return comments.map((c) => {
     const isAuthor = userProfile && (userProfile.uid === c.uid || userProfile.role === "admin");
     return `
       <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(196,169,106,0.07)">
@@ -3786,15 +3870,15 @@ function renderComments(comments, docId, collName) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
             <span style="font-size:13px;font-weight:600">${esc(c.name || "Member")}</span>
-            <span style="font-size:11px;color:var(--text-dim)">${c.createdAt ? formatDate({ toDate:()=>new Date(c.createdAt) }) : ""}</span>
+            <span style="font-size:11px;color:var(--text-dim)">${c.createdAt ? formatDate(c.createdAt) : ""}</span>
           </div>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.4;white-space:pre-wrap;word-break:break-word">${esc(c.text)}</div>
           ${isAuthor ? `
             <div style="display:flex;gap:8px;margin-top:5px">
               <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px"
-                onclick="editComment(\'${docId}\',\'${collName}\',${i})">Edit</button>
+                onclick="editComment(\'${docId}\',\'${collName}\',\'${c.id}\')">Edit</button>
               <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--danger)"
-                onclick="deleteComment(\'${docId}\',\'${collName}\',${i})">Delete</button>
+                onclick="deleteComment(\'${docId}\',\'${collName}\',\'${c.id}\')">Delete</button>
             </div>` : ""}
         </div>
       </div>`;
@@ -4420,8 +4504,7 @@ window.saveHarvestWizard = async function () {
       uploaderInitials: userProfile.initials,
       updatedAt:        serverTimestamp(),
       createdAt:        serverTimestamp(),
-      reactions:        {},
-      comments:         []
+      reactions:        {}
     };
 
     trophyCache = null;
@@ -4509,7 +4592,6 @@ window.saveHarvest = async function () {
     } else {
       payload.createdAt = serverTimestamp();
       payload.reactions = {};
-      payload.comments  = [];
       const newDoc = await addDoc(collection(db, "harvests"), payload);
       closeHarvestForm();
       expandedHarvests.add(newDoc.id);
@@ -4763,6 +4845,7 @@ window.openTcLightbox = async function (id) {
     if (!snap.exists()) { closeTcLightbox(); showToast("Photo not found.","error"); return; }
     trailCamDetail = { id, ...snap.data() };
     renderTcLightboxBody(trailCamDetail);
+    loadAndRenderComments(id, "trailcam");
   } catch(err) { console.error(err); closeTcLightbox(); showToast("Could not load photo.","error"); }
 };
 
@@ -4785,7 +4868,7 @@ function renderTcLightboxBody(tc) {
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px" id="tc-lb-reactions">${renderReactionBadges(reactions,id,"trailcam")}</div>
       ${userProfile?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${REACTIONS_LIST.map(e=>`<button onclick="addTcReaction('${id}','${e}')" style="background:rgba(255,255,255,0.07);border:1px solid var(--card-border);border-radius:20px;padding:5px 10px;font-size:15px;cursor:pointer;transition:all 0.2s;font-family:var(--font-sans)">${e}</button>`).join("")}</div>`:""}
       <div class="fade-divider-plain" style="margin:0 0 12px"></div>
-      <div id="tc-lb-comments">${renderComments(tc.comments||[],id,"trailcam")}</div>
+      <div id="tc-lb-comments"><div class="spinner" style="margin:8px auto"></div></div>
       ${userProfile?`<div style="display:flex;gap:8px;margin-top:12px"><input type="text" id="tc-lb-comment-input" placeholder="Add a comment…" style="flex:1" onkeydown="if(event.key==='Enter')submitTcComment('${id}')" /><button class="btn btn-primary btn-sm" onclick="submitTcComment('${id}')">Post</button></div>`:""}
       ${isOwner?`<div style="margin-top:14px"><button class="btn btn-danger btn-full btn-sm" onclick="deleteTcPhoto('${id}')">🗑 Delete Photo</button></div>`:""}
       <div style="height:32px"></div>
@@ -4811,19 +4894,14 @@ window.submitTcComment = async function (id) {
   const text  = input?.value.trim();
   if (!text) return;
   try {
-    const ref2     = doc(db, "trailcam", id);
-    const snap     = await getDoc(ref2);
-    const comments = snap.data()?.comments || [];
-    comments.push({
+    await addDoc(collection(db, "trailcam", id, "comments"), {
       uid: userProfile.uid, name: userProfile.displayName,
       initials: userProfile.initials, color: userProfile.color,
-      text, createdAt: Date.now()
+      text, createdAt: serverTimestamp()
     });
-    await updateDoc(ref2, { comments });
+    await updateDoc(doc(db, "trailcam", id), { commentCount: increment(1) });
     if (input) input.value = "";
-    const fresh = await getDoc(ref2);
-    const wrap  = document.getElementById("tc-lb-comments");
-    if (wrap) wrap.innerHTML = renderComments(fresh.data()?.comments || [], id, "trailcam");
+    await loadAndRenderComments(id, "trailcam");
     showToast("Comment posted!", "success");
   } catch (err) { console.error(err); showToast("Could not post comment.", "error"); }
 };
@@ -5493,8 +5571,7 @@ window.saveTcPhotos = async function () {
         uploaderInitials: userProfile.initials,
         uploaderColor:    userProfile.color,
         createdAt:        serverTimestamp(),
-        reactions:        {},
-        comments:         []
+        reactions:        {}
       });
       uploaded++;
     } catch(err) {
@@ -6373,7 +6450,7 @@ async function postSeasonAnnouncement(s, kind) {
       type: "season", isAuto: true, uid: null, announceKind: kind,
       seasonLabel: s.label, seasonIcon: s.icon, seasonGroup: s.group,
       start: s.start, end: s.end,
-      createdAt: serverTimestamp(), reactions: {}, comments: []
+      createdAt: serverTimestamp(), reactions: {}
     });
   } catch (err) { console.error("Season announcement:", err); }
 }
@@ -6386,8 +6463,7 @@ async function postAutoFeedEvent(type, data) {
       isAuto:     true,
       uid:        (data && data.uid) || userProfile?.uid || null,   // who triggered it
       createdAt:  serverTimestamp(),
-      reactions:  {},
-      comments:   []
+      reactions:  {}
     });
   } catch(err) { console.error("Auto feed post error:", err); }
 }
@@ -6558,6 +6634,10 @@ function loadFeed() {
         <button class="btn btn-secondary btn-sm" onclick="loadMoreFeed()">Load More</button>
       </div>` : "");
     if (scroller) scroller.scrollTop = keepScroll;
+    // Comments live in a subcollection now, so any thread already expanded
+    // when the list rebuilds (someone else posted, changing the snapshot)
+    // needs its comments re-fetched — feedPostCard only draws a spinner.
+    snap.docs.forEach(d => { if (feedExpandedComments.has(d.id)) loadAndRenderComments(d.id, "feed"); });
 
     // Housekeeping: trim the feed at most once per session, and only from the
     // real server snapshot (not local optimistic writes from reactions/comments).
@@ -6596,13 +6676,13 @@ window.loadMoreFeed = async function () {
 
 function feedPostCard(post) {
   const reactions = post.reactions || {};
-  const comments  = post.comments  || [];
   const dateStr   = formatDate(post.createdAt);
   const isOwner   = userProfile && (userProfile.uid === post.uid || userProfile.role === "admin");
   const isMine    = userProfile && userProfile.uid === post.uid;
   const tint      = safeColor(post.color);
+  const isExpanded = feedExpandedComments.has(post.id);
 
-  const commentCount = comments.length;
+  const commentCount = post.commentCount || 0;
   const reactionText = Object.entries(reactions)
     .filter(([e, users]) => REACTIONS_LIST.includes(e) && Object.keys(users || {}).length > 0)
     .map(([e, users]) => `<span onclick="addFeedReaction('${post.id}','${e}')" style="cursor:pointer">${e} ${Object.keys(users).length}</span>`)
@@ -6642,15 +6722,8 @@ function feedPostCard(post) {
                        font-family:var(--font-sans)">${e}</button>`).join("") : ""}
           </div>
 
-          <div id="feed-comments-${post.id}" class="${feedExpandedComments.has(post.id) ? "" : "hidden"}" style="margin-top:4px">
-            ${renderComments(comments, post.id, "feed")}
-            ${userProfile ? `
-              <div style="display:flex;gap:6px;margin-top:6px">
-                <input type="text" id="feed-comment-input-${post.id}"
-                  placeholder="Reply…" style="flex:1;font-size:12px"
-                  onkeydown="if(event.key==='Enter')submitFeedComment('${post.id}')" />
-                <button class="btn btn-primary btn-sm" onclick="submitFeedComment('${post.id}')">Send</button>
-              </div>` : ""}
+          <div id="feed-comments-${post.id}" class="${isExpanded ? "" : "hidden"}" style="margin-top:4px">
+            ${isExpanded ? `<div class="spinner" style="margin:6px auto"></div>` : ""}
           </div>
         </div>
       </div>
@@ -6668,8 +6741,10 @@ window.toggleFeedComments = function (id) {
   const el = document.getElementById("feed-comments-" + id);
   if (!el) return;
   const nowHidden = el.classList.toggle("hidden");
-  if (nowHidden) feedExpandedComments.delete(id);
-  else feedExpandedComments.add(id);
+  if (nowHidden) { feedExpandedComments.delete(id); return; }
+  feedExpandedComments.add(id);
+  el.innerHTML = `<div class="spinner" style="margin:6px auto"></div>`;
+  loadAndRenderComments(id, "feed");
 };
 
 window.addFeedReaction = async function (id, emoji) {
@@ -6685,30 +6760,14 @@ window.submitFeedComment = async function (id) {
   const text  = input?.value.trim();
   if (!text) return;
   try {
-    const ref2     = doc(db, "feed", id);
-    const snap     = await getDoc(ref2);
-    const comments = snap.data()?.comments || [];
-    comments.push({
+    await addDoc(collection(db, "feed", id, "comments"), {
       uid: userProfile.uid, name: userProfile.displayName,
       initials: userProfile.initials, color: userProfile.color,
-      text, createdAt: Date.now()
+      text, createdAt: serverTimestamp()
     });
-    await updateDoc(ref2, { comments });
+    await updateDoc(doc(db, "feed", id), { commentCount: increment(1) });
     if (input) input.value = "";
-    const fresh = await getDoc(ref2);
-    const wrap  = document.getElementById("feed-comments-" + id);
-    if (wrap) {
-      const newcomments = fresh.data()?.comments || [];
-      wrap.innerHTML = `
-        <div class="fade-divider-plain" style="margin:0 0 10px"></div>
-        ${renderComments(newcomments, id, "feed")}
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <input type="text" id="feed-comment-input-${id}"
-            placeholder="Add a comment…" style="flex:1"
-            onkeydown="if(event.key==='Enter')submitFeedComment('${id}')" />
-          <button class="btn btn-primary btn-sm" onclick="submitFeedComment('${id}')">Post</button>
-        </div>`;
-    }
+    await loadAndRenderComments(id, "feed");
     showToast("Comment posted!", "success");
   } catch(err) { console.error(err); showToast("Could not post comment.", "error"); }
 };
@@ -6752,8 +6811,7 @@ window.submitFeedPost = async function () {
       initials:    userProfile.initials,
       color:       userProfile.color,
       createdAt:   serverTimestamp(),
-      reactions:   {},
-      comments:    []
+      reactions:   {}
     });
 
     collapseFeedComposer();

@@ -25,12 +25,10 @@ The next deep pass should be dedicated to these two themes, not features.
   filename (`<uid>_<timestamp>...`, already the naming convention every upload
   used) or admin (via `firestore.get()` cross-service rule). Also added
   client-side re-verification inside `editComment`/`deleteComment` themselves
-  (not just the button-render gate) as defense in depth. *Remaining gap:* the
-  rule can't tell WHICH comment in the shared array a non-owner touched, only
-  that they didn't touch other fields — a determined non-owner could still
-  edit/delete someone else's individual comment via a raw Firestore call. Fully
-  closing that needs the comments subcollection refactor (post-stress-test
-  item #1) — this pass is a strong mitigation, not the complete fix.
+  (not just the button-render gate) as defense in depth. *Remaining gap, DONE
+  in lite-2.28.0:* see the comments-subcollection migration entry further
+  down — comments are no longer a shared array field at all, so this whole
+  class of gap is closed, not just mitigated.
 - **2026-09-20 security audit — 3 more real gaps found and fixed (lite-2.27.0),
   1 confirmed and deliberately deferred.** User asked directly for a
   best-effort security pass ("i would like for the app to be genuinely safe...
@@ -113,7 +111,8 @@ The next deep pass should be dedicated to these two themes, not features.
   **Deliberately NOT touched this pass:** the comments-array impersonation/
   tampering gap (the *remaining gap* noted above, from lite-2.16.0) — user
   explicitly said to defer it ("fix everything except 3, we will do that
-  later"). Also not touched: nothing stops a member from setting their own
+  later"). **Done two sessions later, in lite-2.28.0** — see the comments-
+  subcollection migration entry further down. Also not touched: nothing stops a member from setting their own
   display name to exactly match another member's (or "Admin") to impersonate
   them socially in the feed/comments — flagged during the audit, but there's
   no clean technical fix available without either weakening the `users` read
@@ -1064,6 +1063,133 @@ call chain — a guard clause that checks `document.getElementById` can fail
 silently and look identical to "the feature just doesn't have data yet,"
 which is exactly why this sat unnoticed through a full version and a live
 deploy.
+
+### Comments moved to a subcollection, closing the impersonation gap — SHIPPED in lite-2.28.0
+
+The real fix for the gap flagged (but deliberately deferred) in the
+2026-09-20 security audit above. User, when asked what the fix would
+actually take and whether it would cost anything: "do it if it doesnt cost
+me anything and keeps things better. i know it might take a while, but lets
+do it the right way." Confirmed it wouldn't — comment/reply text is tiny
+either way, and if anything the old design (rewriting the whole comments
+array on every single add/edit/delete) put slightly *more* load per write
+than one-document-per-comment does; the only real tradeoff is one extra doc
+read per comment when a thread is actually opened, immaterial at this
+camp's scale.
+
+**Rules (`firestore.rules`):** each of `harvests/{id}`, `trailcam/{id}`, and
+`feed/{id}` gained a `/comments/{commentId}` subcollection with plain,
+ordinary ownership rules — `allow create: if ownsNew() || isAdmin()` (admin
+exception explained below), `allow update, delete: if ownsOld() || isAdmin()`.
+No array-diffing needed at all: this is exactly what a subcollection buys
+you. `onlyCommentsOrReactions()` (the old non-owner-update escape hatch) is
+renamed `onlyReactionsOrCommentCount()` and DROPS `'comments'` from its
+allowed keys entirely — even if some future code change accidentally tried
+to write to the old array field again, the rules would now reject it
+outright, not just "the current code doesn't do that." It gained a new
+`commentCount` case with a ±1-delta check (`request.resource.data.commentCount
+== oldCommentCount() ± 1`) so a non-owner can only ever bump the count by
+exactly one in either direction, never set it to an arbitrary number.
+Re-validated via `firebase deploy --only firestore:rules --dry-run` after
+every change (caught one real mistake this way — see below).
+
+**Data model:** each comment is now its own document —
+`{uid, name, initials, color, text, createdAt}` — instead of an entry in a
+shared array on the parent post. The parent post gains a `commentCount`
+field (kept in sync via `increment(1)`/`increment(-1)` on add/delete) so the
+feed's "N replies" badge stays a single free field read instead of needing
+to query the whole subcollection just to count it — the one place this
+would otherwise have cost more reads than before. `reactions` was
+deliberately left as the existing shared map field — same structural
+limitation in principle, but forging a reaction only fakes an emoji tap,
+never rewrites or deletes someone's words, so it stayed out of scope for
+this pass.
+
+**Code changes, all three collections:** `submitHarvestComment`/
+`submitTcComment`/`submitFeedComment` switched from "read the whole array,
+push, write the whole array back" to `addDoc()` a single small document +
+`increment(1)` on the parent. `editComment`/`deleteComment` (shared across
+all three) switched from array-index identity to the comment's real
+document id — `renderComments()` now emits `onclick="editComment(id,coll,
+'${c.id}')"` instead of a numeric index, which is also just a more correct
+identity scheme on its own merits (an index could point at the wrong
+comment if the array changed between render and click; a document id
+can't). New shared `loadAndRenderComments(docId, collName)` fetches the
+subcollection (ordered by `createdAt`) and re-renders via the existing
+`refreshCommentsUI` dispatcher — called wherever a thread needs to appear:
+`toggleHarvestRow`'s fresh-data fetch, `renderHarvestList`'s rebuild loop
+(for a row already expanded when the list re-renders — comments no longer
+ride along with the harvest doc, so they need their own re-fetch),
+`openTcLightbox`, `toggleFeedComments` (now async, fetches on first
+expand), and `loadFeed`'s live-snapshot rebuild loop (same "already
+expanded, needs a re-fetch" reasoning as harvests). `feedPostCard` no longer
+eagerly renders every visible post's full comment thread (hidden via CSS)
+just to have it ready — that would have meant fetching every post's
+subcollection on every feed load whether anyone opens a thread or not,
+exactly the wasted-read pattern the `commentCount` field exists to avoid;
+now it draws a spinner-or-nothing placeholder and `loadAndRenderComments`
+fills it in only when a thread is actually opened. Every doc-creation
+payload that used to set `comments: []` (harvest save/wizard, trail cam
+upload, feed post, auto feed events, season announcements) had that dead
+field removed — comments are never a field on these docs anymore, so
+initializing one was pointless.
+
+**Migration:** existing comments were sitting embedded in production docs'
+`comments` arrays, and simply shipping the new code would have made them
+vanish from view (the app now looks in a subcollection that doesn't have
+them yet) without ever touching the underlying data. Added
+`window.adminMigrateComments` — a one-time, admin-only, **idempotent**
+button in Admin → Content Moderation ("Migrate Comments to New Format"):
+walks every `harvests`/`trailcam`/`feed` doc, and for any with a non-empty
+`comments` array, copies each entry into the new subcollection (old
+`createdAt` — a raw `Date.now()` epoch-ms number in the legacy format —
+converted to a real `Timestamp.fromMillis()` so it sorts and displays
+identically to new comments), sets `commentCount` to match, then clears the
+old array field with `deleteField()`. A post with no `comments` array
+(never had any, or already migrated) is skipped, so tapping the button
+twice is harmless — safe to hit if it's interrupted partway through, no
+need to track progress manually. Logged to `adminLog` on completion.
+**Needed its own rules exception:** the migration runs as the admin, but
+writes each comment preserving its ORIGINAL author's uid (so migrated
+comments still show the right name and can still be edited/deleted by their
+real author afterward) — `ownsNew()` alone would reject this, since the
+writer (admin) and the comment's uid (original author) legitimately differ
+during a migration write. Added `|| isAdmin()` to the comments subcollection's
+`create` rule specifically to allow this. **Caught by reasoning through the
+actual migration write path, not by any tool** — the dry-run compile check
+only validates rules syntax, not permission logic, so it happily "passed"
+the first version too; the gap only surfaced by tracing through what
+`adminMigrateComments` actually writes (someone else's uid, from the
+admin's own auth context) against what `ownsNew()` actually checks. Fixed
+before ever touching production, but a reminder that a clean dry-run only
+means the rules file parses — it says nothing about whether the rules do
+what you meant.
+**Action needed after deploying:** open Admin → Content Moderation and tap
+"Migrate Comments to New Format" once. It's safe to do this any time after
+deploying (existing comments simply won't show until you do), and safe to
+tap more than once.
+
+Verified via temporary `window.__debugSetUser`/`__debugEnterApp` hooks plus
+new throwaway hooks exposing the module-scoped render functions
+(`renderHarvestDetailInline`, `feedPostCard`, `renderTcLightboxBody`,
+`refreshCommentsUI`, `loadAndRenderComments`) directly, since a full live
+round-trip against real Firestore still isn't possible in this sandbox (no
+auth) — confirmed: the harvest detail panel shows a loading spinner then
+gracefully falls back to "Could not load comments" against the sandbox's
+expected permission-denied; injecting fixture comment objects with real
+`.id` fields renders correctly, with Edit/Delete buttons wired to the right
+document id and correctly hidden for a comment that isn't the viewer's own;
+the feed card's "N replies" badge reads `commentCount` with no eager fetch;
+clicking to expand a feed thread shows a spinner then attempts (and
+gracefully fails, same sandbox limitation) the real fetch; the trail-cam
+lightbox comment area behaves identically via the same shared code path;
+and the admin migration button runs its full loop without throwing an
+uncaught error when its first Firestore call is rejected — console shows
+only the expected permission-denied noise, no crash. All debug hooks
+removed after. The live migration itself (`adminMigrateComments` actually
+moving real data) is unverified — same sandbox-has-no-auth ceiling as every
+other write path in this project — so budget a careful first run and a
+look at the admin log afterward once this is live.
 
 ## Also noted (minor, no rush)
 

@@ -26,11 +26,23 @@ service cloud.firestore {
     function isSeasonAnnouncement() {
       return signedIn() && request.resource.data.type == 'season' && request.resource.data.uid == null;
     }
-    // A non-owner may only touch the comments/reactions maps (read-modify-write
-    // for the shared comment/reaction UI) — never the post's own content.
-    function onlyCommentsOrReactions() {
+    // A non-owner may only touch the reactions map (read-modify-write for the
+    // shared reaction UI) or bump the denormalized commentCount by exactly
+    // ±1 (kept in sync with the comments subcollection below) — never the
+    // post's own content. Comments themselves live in their own subcollection
+    // (see the /comments match blocks) specifically so this can't be abused
+    // to rewrite or delete someone else's reply — a shared array field can't
+    // be validated element-by-element in rules, which is exactly the gap a
+    // subcollection closes: each comment is its own document with its own
+    // ownership check.
+    function oldCommentCount() { return ('commentCount' in resource.data) ? resource.data.commentCount : 0; }
+    function onlyReactionsOrCommentCount() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
       return signedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments', 'reactions']);
+        && affected.hasOnly(['reactions', 'commentCount'])
+        && (!affected.hasAny(['commentCount'])
+            || request.resource.data.commentCount == oldCommentCount() + 1
+            || request.resource.data.commentCount == oldCommentCount() - 1);
     }
 
     // ---- sign-up config -------------------------------------------------
@@ -53,21 +65,36 @@ service cloud.firestore {
     }
 
     // ---- member-authored content ------------------------------------
-    // Comments and reactions are stored on the parent doc (read-modify-write).
-    // A non-owner may update ONLY those two fields (see onlyCommentsOrReactions) —
-    // the post's own content can only be changed by its author or an admin.
-    // Create is locked to the author; delete is author-or-admin.
+    // Reactions live on the parent doc (read-modify-write); comments are
+    // their own subcollection (see /comments blocks below, right after each
+    // parent match). A non-owner may update ONLY the reactions map or bump
+    // commentCount by one (see onlyReactionsOrCommentCount) — the post's own
+    // content can only be changed by its author or an admin. Create is
+    // locked to the author; delete is author-or-admin.
     match /harvests/{id} {
       allow read:   if signedIn();
       allow create: if ownsNew();
-      allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
+      allow update: if ownsOld() || isAdmin() || onlyReactionsOrCommentCount();
       allow delete: if ownsOld() || isAdmin();
+      // create allows admin too, not just ownsNew() — the one-time comments
+      // migration writes each comment as its ORIGINAL author, run by an
+      // admin, so the writer's uid and the comment's uid legitimately differ.
+      match /comments/{commentId} {
+        allow read:   if signedIn();
+        allow create: if ownsNew() || isAdmin();
+        allow update, delete: if ownsOld() || isAdmin();
+      }
     }
     match /trailcam/{id} {
       allow read:   if signedIn();
       allow create: if ownsNew();
-      allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
+      allow update: if ownsOld() || isAdmin() || onlyReactionsOrCommentCount();
       allow delete: if ownsOld() || isAdmin();
+      match /comments/{commentId} {
+        allow read:   if signedIn();
+        allow create: if ownsNew() || isAdmin();
+        allow update, delete: if ownsOld() || isAdmin();
+      }
     }
     match /trailcamAlbums/{id} {
       allow read:   if signedIn();
@@ -78,8 +105,13 @@ service cloud.firestore {
     match /feed/{id} {
       allow read:   if signedIn();
       allow create: if ownsNew() || isSeasonAnnouncement();   // auto events carry the triggerer's uid; season posts don't
-      allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
+      allow update: if ownsOld() || isAdmin() || onlyReactionsOrCommentCount();
       allow delete: if isAdmin() || ownsOld();
+      match /comments/{commentId} {
+        allow read:   if signedIn();
+        allow create: if ownsNew() || isAdmin();
+        allow update, delete: if ownsOld() || isAdmin();
+      }
     }
 
     // ---- calendar + contests ----------------------------------------
