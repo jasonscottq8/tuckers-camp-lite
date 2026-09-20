@@ -549,6 +549,46 @@ Same session, next round of feedback.
    feed banner, and both "opens today"/"opens in 3 days" bell variants all
    confirmed rendering correctly.
 
+### Cabin Trophy Room reorder + Seasons page visual pass — SHIPPED in lite-2.22.1–2.22.4
+
+Same session, quick follow-ups.
+1. **Trophies before stats.** User: "id like to scroll down and end up at the
+   stats at the bottom." `campStatsHTML()` moved from the top of
+   `renderMasterTrophyRoom`'s output to just above the "← My Trophy Room"
+   button, so the champion/runner-up categories now lead.
+2. **Seasons categories made collapsible**, default **collapsed** (not
+   expanded) — `window.toggleSeasonGroup(gid)` toggles a `hidden` class +
+   rotates an arrow indicator; state isn't persisted between visits.
+3. **Visual pass on the collapsible headers**, iterated live against
+   feedback: pill-shaped gold buttons → felt "pill crazy" and the expanded
+   content looked like "a pill button dropping a bunch of box buttons" →
+   settled on plain rectangular headers in the same blaze-orange gradient as
+   the home screen's Quick Actions (`.action-btn`'s gradient), sitting flush
+   on top of the dropdown content with no gap or outer border — a real
+   "dropdown sheet" feel. All emoji removed from both the group headers and
+   the individual season rows per "get rid of the graphics... text only."
+4. **Smarter "open now*" asterisk.** Initial version flagged a category as
+   "partial" whenever fewer than 100% of its rows were open *that specific
+   day*, which is meaningless for a group whose rows were never going to
+   overlap in the first place (spring turkey happens in April–June, fall in
+   Sept–Jan — comparing them is apples to oranges). User caught this
+   directly: "turkey season in the fall is the only exception i can see. its
+   fully open for zones allowed. the spring would be the asterisk season."
+   Fixed with `clusterSeasons(list, toleranceDays=14)` — a simple interval-
+   merge that groups a category's rows into time clusters first (adjacent-or-
+   overlapping date ranges, with a 2-week tolerance so e.g. Goose North
+   ending Dec 16 and Goose South's third split starting Dec 19 still count as
+   the same cluster). The asterisk now only fires when the cluster containing
+   *today's open row(s)* has other rows in that same cluster that aren't
+   open — e.g. deer's archery season is the connective tissue that pulls
+   nearly all 8 deer rows into one cluster, so deer almost always shows the
+   asterisk when open; fall turkey has no sibling rows anywhere near its own
+   window, so it's its own single-row cluster and never gets one; spring
+   turkey's 7 back-to-back weekly periods cluster together and do get one.
+   Verified against today's real date (Sept 19, 2026): Deer/Small Game/
+   Waterfowl show `open now*`, Bear and Turkey (fall, currently open) show
+   plain `open now` — matching the user's stated expectation exactly.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
