@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.26.0";
+const APP_VERSION = "lite-2.26.1";
 
 
 
@@ -1575,6 +1575,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.26.1", date: "Sep 2026", notes: [
+      "Fixed: you can now post a photo to the message feed without also having to write something"
+    ]},
     { version: "lite-2.26.0", date: "Sep 2026", notes: [
       "New Trapping category on the Seasons page — coyote, fox, raccoon, fisher, bobcat, otter, beaver, and mink/muskrat, by zone"
     ]},
@@ -6553,9 +6556,11 @@ function feedPostCard(post) {
           ${esc(post.initials || "?")}</div>
 
         <div style="min-width:0;display:flex;flex-direction:column;align-items:${isMine ? "flex-end" : "flex-start"}">
-          <div onclick="toggleFeedComments('${post.id}')" style="display:inline-block;max-width:100%;background:${colorTint(tint, 0.16)};border:1px solid ${colorTint(tint, 0.35)};border-radius:var(--radius-xl);padding:10px 16px;font-size:13px;color:var(--text-warm);line-height:1.4;white-space:pre-wrap;word-break:break-word;cursor:pointer">${esc(post.text || "").trim()}</div>
-          ${post.photoURL ? `<img src="${esc(post.photoURL)}"
-            style="max-width:100%;border-radius:12px;margin-top:4px;display:block" />` : ""}
+          <div onclick="toggleFeedComments('${post.id}')" style="display:flex;flex-direction:column;gap:4px;max-width:100%;cursor:pointer;align-items:${isMine ? "flex-end" : "flex-start"}">
+            ${post.text?.trim() ? `<div style="display:inline-block;max-width:100%;background:${colorTint(tint, 0.16)};border:1px solid ${colorTint(tint, 0.35)};border-radius:var(--radius-xl);padding:10px 16px;font-size:13px;color:var(--text-warm);line-height:1.4;white-space:pre-wrap;word-break:break-word">${esc(post.text).trim()}</div>` : ""}
+            ${post.photoURL ? `<img src="${esc(post.photoURL)}"
+              style="max-width:100%;border-radius:12px;display:block" />` : ""}
+          </div>
 
           <div style="display:flex;${isMine ? "flex-direction:row-reverse" : ""};align-items:center;gap:8px;
                       font-size:10px;color:var(--text-dim);margin-top:3px">
@@ -6663,7 +6668,7 @@ window.submitFeedPost = async function () {
   const file  = document.getElementById("feed-photo-input")?.files?.[0] || null;
   const btn   = document.getElementById("feed-post-btn");
 
-  if (!text) { showToast("Write something first.", "error"); return; }
+  if (!text && !file) { showToast("Write something or add a photo.", "error"); return; }
   if (btn) { btn.disabled = true; btn.textContent = "Posting…"; }
 
   try {

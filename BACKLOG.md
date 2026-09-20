@@ -894,6 +894,34 @@ five, Trapping expands to all 15 rows sorted chronologically, and — correct
 for today's real date (Sept 20, 2026, well before the Oct 17 opener for most
 of these) — none show "open now" yet.
 
+### Feed: photo-only posts — SHIPPED in lite-2.26.1
+
+Real bug, user's own words: "i shouldnt have to write anything to post a
+picture in the message feed. a picture is good enough as a message." Two
+separate problems, both in the feed compose path:
+1. `submitFeedPost()` had a hard `if (!text) { showToast("Write something
+   first."...); return; }` guard that fired regardless of whether a photo was
+   attached — a photo with no caption couldn't be posted at all. Changed to
+   `if (!text && !file)`, so either one alone is enough.
+2. `feedPostCard()` unconditionally rendered the text bubble
+   (`${esc(post.text || "").trim()}`) even when text was empty, which
+   would've shown a hollow, oddly-padded empty bubble sitting above the
+   photo the moment posting-without-text actually worked. Restructured so
+   the text bubble only renders when `post.text` is non-empty, and moved the
+   `onclick="toggleFeedComments(...)"` handler onto a shared wrapper div
+   around both the (optional) text bubble and the (optional) photo, so
+   tapping a photo-only post still opens/closes its reply thread the same
+   way tapping a text bubble always has.
+
+Verified via a temporary `window.__debugFeedCard` hook (removed after)
+rendering three fixture posts side by side — photo-only (no empty bubble,
+image sits flush at the top), text+photo (bubble above image, unchanged from
+before), and text-only (unchanged from before) — confirming no regression
+on the two cases that already worked. The actual Storage upload + Firestore
+write path is unverified live, same sandbox-has-no-auth limitation as every
+other write path in this project — the fix itself is a simple guard-clause
+and template change, not new async logic, so this is low risk.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
