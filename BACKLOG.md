@@ -414,6 +414,141 @@ members — confirmed bear categories populate correctly, waterfowl/small game
 (no test data) correctly fall into "Not claimed yet" alongside all 5
 not-yet-closed contests.
 
+### Specific buck/turkey categories + Camp Stats trivia — SHIPPED in lite-2.21.0
+
+Follow-up after the last batch — user clarified (via a clarifying question,
+since it first read like a request to gut the seasonal Contests feature) that
+the actual complaint was about the Trophy Room's category names being too
+vague: "there shouldnt be an award for 'bow buck' unless its the biggest bow
+buck... is it heavier? are its antlers greater in some regard?" Contests were
+left untouched. Split the old single "Biggest buck" (ranked by `rackScore`)
+into explicit, differently-measured categories so each trophy is clear about
+what makes the winner the winner: **Biggest Rack (B&C Score)** (unchanged,
+renamed), **Widest Rack (Spread)** (new — `insideSpread`, already tracked by
+the harvest wizard but never surfaced anywhere), **Most Antler Points** (new
+— `antlerPoints`), **Heaviest Buck** (new — `weight` filtered to bucks only,
+distinct from the existing camp-wide "Heaviest Animal (Any Species)"). Turkey
+got the matching treatment: **Most Turkeys** (new count) alongside the
+existing Longest Beard/Longest Spurs, plus **Heaviest Turkey** (new). All new
+fields added to `emptyMemberStats`/`computeTrophyStats`
+(`widestRack`/`mostPoints`/`heaviestBuck`/`turkeys`/`heaviestTurkey`) the same
+way the bear/waterfowl/smallgame fields were added last batch — `allCats` grew
+from 13 to 18.
+  **Camp Stats card** — new `computeCampStats(cache)` + `campStatsHTML()`,
+rendered at the very top of the Cabin Trophy Room in a gold-gradient callout.
+Per the user's own framing ("i like stats and data... specific data is fun,
+this is why NFL announcers always say the craziest stats they can find even
+if they dont matter") and the follow-up "let's stroke some cabin ego on this
+page" — camp-wide trivia, not per-member rankings: total animals taken +
+species breakdown, busiest single day on record, first-ever and most-recent
+harvest logged (by whom, what, when), firearm-vs-bow buck count, average buck
+B&C score, and the camp's "luckiest day of the week" (most harvests fall on
+that weekday, all-time). Deliberately framed as fun trivia, separate from the
+"champion and runner-up" trophy list below it.
+  **Bug fixed during testing (test-fixture-only, not production):** first
+`__debugTrophyCache` fixture pass threw `RangeError: Invalid time value` in
+`computeCampStats` — the fake `harvestDate` objects only had `.toDate()`, not
+`.toMillis()`, and `harvestMillis()` needs the latter. Real Firestore
+Timestamps always have both; fixed the test fixture, not the app code. Also
+caught and fixed a real pluralization bug the first successful render
+surfaced: the species-breakdown line said "3 deers" — `deer` and `waterfowl`
+are invariant plurals, only `smallgame` had that exception before.
+  **Round 2 — "NFL announcer" pass, still lite-2.21.0 (same session, before
+commit).** User asked to roughly double the stat count to ~25, then pushed
+further: "think NFL announcers and how ridiculously specific some of their
+data is per player... i want people to know its serious" — meaning name a
+specific member wherever possible, not just camp-wide totals. Removed two
+weak entries the user called out directly: "Most recent harvest" ("isnt a
+record... a notification at best") and "Camp's luckiest day of the week."
+Added, all computed from fields the harvest wizard already collects —
+**no wizard changes were needed or made**, per the user's explicit
+"don't make it tiring in the harvest log" constraint:
+  - **Doe Records** (new section) — most does in a single day (camp-wide),
+    most does in a single season camp-wide, and most does in a season by one
+    named hunter.
+  - Named single-day/single-season records: most kill points in one day,
+    biggest single-day bag by one hunter (any species, by quantity), most
+    grouse in one season by one hunter (grouse being the iconic northern-WI
+    small-game bird — this is hunting in northern Wisconsin, per the user).
+  - Camp-wide (not per-member) collective dry spell — the longest gap between
+    ANY two harvests logged by anyone, distinct from the existing per-member
+    dry-spell stat.
+  - Earliest and latest calendar-day harvest on record (month/day only,
+    ignoring year — "when does camp's season typically open/close").
+  - Most different species taken in a single day (e.g. "deer & waterfowl on
+    the same day").
+  - Gun-vs-bow split for ALL deer (bucks AND does — `weapon` turned out to
+    already be captured for does too, not just bucks, so this needed zero
+    schema work).
+  Net: went from ~27 possible stat lines to ~35, replacing 2 and adding 9,
+  reorganized into 6 sections (Camp Totals, Standing Records, Doe Records,
+  Streaks & Timing, Calendar, Breakdowns). Removed the now-dead `DOW_NAMES`
+  constant along with the day-of-week logic it only served. Verified the full
+  expanded card against a 3-member, 16-harvest fixture spanning 2020–2026 via
+  the same `__debugTrophyCache` pattern — every new line populated correctly
+  with a plausible name/date/number, screenshotted at full scroll depth.
+
+### Off-season-aware dry spells + Seasons page + auto season announcements — SHIPPED in lite-2.22.0
+
+Same session, next round of feedback.
+
+1. **Dry-spell stats now skip the off-season.** User: "make sure that
+   statistics that include things like 'longest dry spell' doesn't include
+   any time before september 1st... and whatever the last day is of the last
+   possible season," then refined it — "i dont want summer or spring (minus
+   turkey) to get in the way." New `isOffSeasonMonth(m)` + `seasonDaysBetween()`
+   treat only **February, July, and August** as truly dead months — everything
+   else is covered by either the Sept–Jan fall season block or the existing
+   `turkeySeason()` spring window (Mar–Jun), so spring turkey hunters don't get
+   penalized either. Applied to both `dryLeader` (per-hunter) and `campGap`
+   (camp-wide collective dry spell) in `computeCampStats`.
+2. **Camp Stats stripped of all icons.** User: "get rid of all the graphics...
+   id like text and borders/lines only." Removed every emoji from
+   `campStatsHTML()`'s ~35 lines and the species-breakdown line in
+   `computeCampStats`; card background changed from a gold gradient to a plain
+   `--forest-card` panel, each section gets a `border-top` label and each line
+   a `border-bottom` divider instead of an icon prefix.
+3. **New Seasons page** (`screen-seasons`, drawer entry, `renderSeasonsScreen`).
+   Lists every 2026 Wisconsin DNR season — deer, bear, turkey (7 periods),
+   small game/upland birds, waterfowl (~32 entries total) — grouped and sorted,
+   with whatever's open *today* highlighted. Dates sourced live from
+   dnr.wisconsin.gov/topic/hunt/dates via WebFetch this session (user: "you can
+   update your information on that on the DNR website if you like") and stored
+   as a plain `SEASON_DEFAULTS` JS array (not Firestore) — **this needs manual
+   updating from the DNR site every year**, there's no admin-edit UI for it.
+   New `seasonDateLabel()` helper for the short date format.
+4. **Season-opener announcements**, the one thing user asked to appear in
+   THREE places: bell, calendar, and the feed (explicitly as "the only
+   notification sent by the app in the message feed" — everything else stays
+   bell-only per the lite-2.18–2.19 design). `checkSeasonAnnouncements()` runs
+   once per `enterApp()` on any member's client; for each `SEASON_DEFAULTS`
+   entry whose `start` is today (or 3 days out), `postSeasonAnnouncement()`
+   writes a **deterministic-id** `feed` doc (`season_<slug>_<year>_<kind>`) —
+   safe against duplicate posts from multiple members opening the app at once,
+   since a second `setDoc` on the same id either no-ops (checked via `getDoc`
+   first) or fails harmlessly. `firestore.rules` gained `isSeasonAnnouncement()`
+   (`type=='season' && uid==null`, any signed-in member can create) since these
+   posts have no author — validated via `firebase deploy --only firestore:rules --dry-run`.
+   Season docs get `isAuto:true`, so the **existing** bell listener already
+   picks them up for free; `notifCard()` got a new `item.type==="season"`
+   branch. The feed shows them as a small pinned banner above the scrolling
+   list (`loadSeasonBanners()`/`seasonBannerHTML()`, fetched via a plain
+   `where("type","==","season")` query — deliberately no `orderBy`, so no new
+   composite index is needed) rather than merging them into the paginated
+   chat-bubble list. The calendar grid (`monthDayCell`) gained a second,
+   green dot alongside the existing red activity dot for any day matching a
+   season's `start`; the day-detail popup (`openCalendarDay`) shows an "X opens
+   today" banner for the same. **Field-naming near-miss caught during testing:**
+   the season doc's own `kind` field ("opens"/"reminder") collided with the
+   bell's pre-existing `item.kind` convention ("visit" vs "auto") — the
+   `else if (item.type==="season")` check order happened to still work, but
+   renamed to `announceKind` anyway rather than leave a fragile coincidence in
+   place. Verified via `__debugTrophyCache`/`__debugSeasonBanner`/`__debugNotif`
+   hooks: calendar green dots appeared on real DNR dates including today
+   (Sept 19 — Woodcock + Youth Waterfowl both open that day), day-popup banner,
+   feed banner, and both "opens today"/"opens in 3 days" bell variants all
+   confirmed rendering correctly.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,

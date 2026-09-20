@@ -20,6 +20,12 @@ service cloud.firestore {
     }
     function ownsNew() { return signedIn() && request.resource.data.uid == uid(); }
     function ownsOld() { return signedIn() && resource.data.uid == uid(); }
+    // The app itself (not a specific member) posts season-opener announcements
+    // — no owner uid, any signed-in member's client may create one (the app
+    // checks-and-creates by a deterministic doc id, so duplicates can't stick).
+    function isSeasonAnnouncement() {
+      return signedIn() && request.resource.data.type == 'season' && request.resource.data.uid == null;
+    }
     // A non-owner may only touch the comments/reactions maps (read-modify-write
     // for the shared comment/reaction UI) — never the post's own content.
     function onlyCommentsOrReactions() {
@@ -71,7 +77,7 @@ service cloud.firestore {
     }
     match /feed/{id} {
       allow read:   if signedIn();
-      allow create: if ownsNew();           // auto events now carry the triggerer's uid
+      allow create: if ownsNew() || isSeasonAnnouncement();   // auto events carry the triggerer's uid; season posts don't
       allow update: if ownsOld() || isAdmin() || onlyCommentsOrReactions();
       allow delete: if isAdmin() || ownsOld();
     }

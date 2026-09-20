@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.20.0";
+const APP_VERSION = "lite-2.22.0";
 
 
 
@@ -637,6 +637,7 @@ function enterApp() {
 
   // Bell badge / app-icon dot — live for the whole session, not just the bell screen
   startNotifListeners();
+  checkSeasonAnnouncements();
 }
 
 // ============================================================
@@ -687,6 +688,7 @@ window.goTo = function (screenId) {
     case "screen-settings": renderSettingsScreen(); break;
     case "screen-updates":  renderUpdatesScreen();  break;
     case "screen-bylaws":   renderBylawsScreen();   break;
+    case "screen-seasons":  renderSeasonsScreen();  break;
     case "screen-contests": renderContestsScreen(); break;
     case "screen-mykills":  renderTrophyRoom();     break;
     case "screen-master-trophy": renderMasterTrophyRoom(); break;
@@ -821,6 +823,13 @@ function notifCard(item) {
     if (dp && item.dayPart !== "allday") bits.push(dp.label);
     body = `<strong>${esc(item.visitorName || "A member")}</strong> is on the calendar for ${esc(visitRangeLabel(item))}${bits.length ? " — " + esc(bits.join(", ")) : ""}`;
     link = `<a onclick="goCalendar()" style="${NOTIF_LINK_STYLE}">View Calendar</a>`;
+  } else if (item.type === "season") {
+    icon  = item.seasonIcon || "📆";
+    color = NOTIF_DEFAULT_COLOR;
+    body  = item.announceKind === "reminder"
+      ? `<strong>${esc(item.seasonLabel)}</strong> opens in 3 days (${esc(seasonDateLabel(item.start))})`
+      : `<strong>${esc(item.seasonLabel)}</strong> opens today`;
+    link  = `<a onclick="goTo('screen-seasons')" style="${NOTIF_LINK_STYLE}">View Seasons</a>`;
   } else {
     const tmpl = AUTO_FEED_TYPES[item.type];
     body  = tmpl ? tmpl(item.data || {}) : "New activity at Tucker's Camp";
@@ -1568,6 +1577,16 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.22.0", date: "Sep 2026", notes: [
+      "New Seasons page (in the hamburger menu) — every Wisconsin DNR season and its dates, with what's open right now highlighted",
+      "The app now posts a heads-up when a season opens (and a 3-day reminder before) — in the bell, the calendar, and as the one automatic post the message feed still gets",
+      "Dry-spell stats no longer count the off-season (Feb/Jul/Aug and outside spring turkey) against you",
+      "Camp Stats is now plain text with dividers, no icons"
+    ]},
+    { version: "lite-2.21.0", date: "Sep 2026", notes: [
+      "Buck and turkey trophies are now split into specific categories — widest rack, most points, heaviest buck, heaviest turkey, and more — instead of one generic \"biggest\"",
+      "New Camp Stats card at the top of the Cabin Trophy Room — 35+ specific, named stats: standing records, doe records, harvest streaks, dry spells, calendar trivia, and species breakdowns"
+    ]},
     { version: "lite-2.20.0", date: "Sep 2026", notes: [
       "Cabin Trophy Room now tracks bears, waterfowl, and small game too, not just deer and turkey",
       "Categories nobody's claimed yet — and contests that haven't been closed for the year — now show in a \"Not claimed yet\" list, so you can see every trophy that's up for grabs"
@@ -1843,6 +1862,111 @@ function renderBylawsScreen() {
           By-Laws text will be added here. Contact an admin to submit the official club articles.
         </div>
       </div>
+    </div>`;
+}
+
+// ============================================================
+// SEASONS — Wisconsin DNR dates for the current license year.
+// Sourced from dnr.wisconsin.gov/topic/hunt/dates on 2026-09-19 for the
+// 2026 season. These change every year — an admin (or Claude, next season)
+// needs to update this list each fall from the DNR's own page. Zones vary by
+// species; labels spell out which zone/split each row covers.
+// ============================================================
+const SEASON_GROUPS = {
+  deer:      { label: "Deer",                    icon: "🦌" },
+  bear:      { label: "Bear",                    icon: "🐻" },
+  turkey:    { label: "Turkey",                  icon: "🦃" },
+  smallgame: { label: "Small Game & Upland Birds", icon: "🐇" },
+  waterfowl: { label: "Waterfowl",               icon: "🦆" }
+};
+const SEASON_DEFAULTS = [
+  { group: "deer", icon: "🏹", label: "Archery & Crossbow",              start: "2026-09-12", end: "2027-01-03" },
+  { group: "deer", icon: "🏹", label: "Archery & Crossbow (Extended)",   start: "2026-09-12", end: "2027-01-31" },
+  { group: "deer", icon: "🔫", label: "Youth & Disabled Gun Hunt",       start: "2026-10-10", end: "2026-10-11" },
+  { group: "deer", icon: "🔫", label: "Gun Deer (Regular)",              start: "2026-11-21", end: "2026-11-29" },
+  { group: "deer", icon: "🔫", label: "Gun Deer (Metro Subunits)",       start: "2026-11-21", end: "2026-12-09" },
+  { group: "deer", icon: "💥", label: "Muzzleloader",                    start: "2026-11-30", end: "2026-12-09" },
+  { group: "deer", icon: "🦌", label: "December Antlerless-Only",        start: "2026-12-10", end: "2026-12-13" },
+  { group: "deer", icon: "🦌", label: "Holiday Antlerless-Only",         start: "2026-12-24", end: "2027-01-01" },
+
+  { group: "bear", icon: "🐻", label: "Zones A, B, D (dogs permitted)",  start: "2026-09-09", end: "2026-10-13" },
+  { group: "bear", icon: "🐻", label: "Zones C, E, F (no dogs)",         start: "2026-09-09", end: "2026-10-13" },
+
+  { group: "turkey", icon: "🦃", label: "Spring — Youth Hunt",           start: "2026-04-11", end: "2026-04-12" },
+  { group: "turkey", icon: "🦃", label: "Spring — Period A",             start: "2026-04-15", end: "2026-04-21" },
+  { group: "turkey", icon: "🦃", label: "Spring — Period B",             start: "2026-04-22", end: "2026-04-28" },
+  { group: "turkey", icon: "🦃", label: "Spring — Period C",             start: "2026-04-29", end: "2026-05-05" },
+  { group: "turkey", icon: "🦃", label: "Spring — Period D",             start: "2026-05-06", end: "2026-05-12" },
+  { group: "turkey", icon: "🦃", label: "Spring — Period E",             start: "2026-05-13", end: "2026-05-19" },
+  { group: "turkey", icon: "🦃", label: "Spring — Period F",             start: "2026-05-20", end: "2026-05-26" },
+  { group: "turkey", icon: "🦃", label: "Fall",                          start: "2026-09-12", end: "2027-01-03" },
+
+  { group: "smallgame", icon: "🐇", label: "Rabbit — Northern Zone",     start: "2026-09-12", end: "2027-02-28" },
+  { group: "smallgame", icon: "🐇", label: "Rabbit — Southern Zone",     start: "2026-10-17", end: "2027-02-28" },
+  { group: "smallgame", icon: "🐿️", label: "Squirrel",                   start: "2026-09-12", end: "2027-02-28" },
+  { group: "smallgame", icon: "🐦", label: "Pheasant",                   start: "2026-10-17", end: "2027-01-03" },
+  { group: "smallgame", icon: "🌲", label: "Ruffed Grouse — Zone A (North)", start: "2026-09-12", end: "2027-01-03" },
+  { group: "smallgame", icon: "🌲", label: "Ruffed Grouse — Zone B",     start: "2026-10-17", end: "2026-12-08" },
+  { group: "smallgame", icon: "🐦", label: "Woodcock",                   start: "2026-09-19", end: "2026-11-02" },
+
+  { group: "waterfowl", icon: "🦆", label: "Early Teal",                 start: "2026-09-01", end: "2026-09-09" },
+  { group: "waterfowl", icon: "🦆", label: "Youth Waterfowl Hunt",       start: "2026-09-19", end: "2026-09-20" },
+  { group: "waterfowl", icon: "🦆", label: "Duck — Northern Zone",       start: "2026-09-26", end: "2026-11-24" },
+  { group: "waterfowl", icon: "🦆", label: "Duck — Southern Zone (Split 1)", start: "2026-10-03", end: "2026-10-11" },
+  { group: "waterfowl", icon: "🦆", label: "Duck — Southern Zone (Split 2)", start: "2026-10-17", end: "2026-12-06" },
+  { group: "waterfowl", icon: "🦆", label: "Early Goose",                start: "2026-09-01", end: "2026-09-15" },
+  { group: "waterfowl", icon: "🦆", label: "Goose — Northern Zone",      start: "2026-09-16", end: "2026-12-16" },
+  { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 1)", start: "2026-09-16", end: "2026-10-11" },
+  { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 2)", start: "2026-10-17", end: "2026-12-06" },
+  { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 3)", start: "2026-12-19", end: "2027-01-02" }
+];
+
+function seasonDateLabel(iso) {
+  return new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function renderSeasonsScreen() {
+  const el = document.getElementById("seasons-content");
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const byGroup = {};
+  SEASON_DEFAULTS.forEach(s => { (byGroup[s.group] = byGroup[s.group] || []).push(s); });
+  Object.values(byGroup).forEach(list => list.sort((a, b) => a.start.localeCompare(b.start)));
+
+  el.innerHTML = `
+    <div style="padding:14px 16px 40px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">
+        Wisconsin DNR season dates. Open seasons are highlighted. These change every year —
+        check <a href="https://dnr.wisconsin.gov/topic/hunt/dates" target="_blank" rel="noopener"
+        style="color:var(--gold)">dnr.wisconsin.gov</a> to confirm before you head out.
+      </div>
+      ${Object.entries(SEASON_GROUPS).map(([gid, g]) => {
+        const list = byGroup[gid] || [];
+        if (!list.length) return "";
+        return `
+          <div style="font-family:var(--font-serif);font-size:15px;color:var(--gold);margin:16px 0 8px">
+            ${g.icon} ${esc(g.label)}
+          </div>
+          ${list.map(s => {
+            const open = today >= s.start && today <= s.end;
+            return `
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;
+                          background:${open ? "rgba(196,169,106,0.14)" : "var(--forest-card)"};
+                          border:1px solid ${open ? "var(--gold-dim)" : "var(--card-border)"};
+                          border-radius:var(--radius-md)">
+                <span style="font-size:16px;flex-shrink:0">${s.icon}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;color:var(--text-warm);font-weight:${open ? "600" : "400"}">${esc(s.label)}</div>
+                  <div style="font-size:11px;color:var(--text-dim);margin-top:1px">
+                    ${esc(seasonDateLabel(s.start))} – ${esc(seasonDateLabel(s.end))}
+                  </div>
+                </div>
+                ${open ? `<span style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;
+                            letter-spacing:0.5px;flex-shrink:0">Open now</span>` : ""}
+              </div>`;
+          }).join("")}`;
+      }).join("")}
     </div>`;
 }
 
@@ -5534,11 +5658,13 @@ function monthDayCell(dateStr, d, isToday, size) {
   const dayVisits = visitsOnDay(dateStr);
   const hasActivity = dayVisits.length > 0;
   const mineHere  = userProfile && dayVisits.some(v => v.uid === userProfile.uid);
+  const seasonsToday = SEASON_DEFAULTS.filter(s => s.start === dateStr);
   const border    = mineHere ? "var(--gold)" : isToday ? "var(--gold-dim)" : "rgba(237,226,200,0.10)";
   const baseBg    = isToday ? "rgba(196,169,106,0.10)" : "rgba(237,226,200,0.06)";
   const dotSize   = size === "sm" ? 5 : 6;
   return `
     <div onclick="openCalendarDay('${dateStr}')"
+      ${seasonsToday.length ? `title="${esc(seasonsToday.map(s => s.label).join(", "))} opens today"` : ""}
       style="position:relative;aspect-ratio:1;border-radius:var(--radius-md);cursor:pointer;
              background:${baseBg};border:1px solid ${border};min-height:${size === "sm" ? 32 : 44}px;
              display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px"
@@ -5546,9 +5672,13 @@ function monthDayCell(dateStr, d, isToday, size) {
       onmouseout="this.style.borderColor='${border}'">
       <div style="font-size:${size === "sm" ? 12 : 13}px;font-weight:${isToday ? "700" : "400"};
                   color:${isToday ? "var(--gold)" : "var(--text-warm)"}">${d}</div>
-      <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;
-                  background:${hasActivity ? "#ef4444" : "transparent"};
-                  box-shadow:${hasActivity ? "0 0 5px rgba(239,68,68,0.8)" : "none"}"></div>
+      <div style="display:flex;gap:3px">
+        <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;
+                    background:${hasActivity ? "#ef4444" : "transparent"};
+                    box-shadow:${hasActivity ? "0 0 5px rgba(239,68,68,0.8)" : "none"}"></div>
+        ${seasonsToday.length ? `<div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;
+                    background:#6b8f3b;box-shadow:0 0 5px rgba(107,143,59,0.8)"></div>` : ""}
+      </div>
     </div>`;
 }
 
@@ -5800,6 +5930,13 @@ window.openCalendarDay = function (dateStr) {
       </div>
 
       <div style="padding:16px 18px">
+
+        ${SEASON_DEFAULTS.filter(s => s.start === dateStr).map(s => `
+          <div style="font-size:12px;color:var(--text-warm);background:rgba(107,143,59,0.16);
+                      border:1px solid rgba(107,143,59,0.4);border-radius:var(--radius-md);
+                      padding:8px 12px;margin-bottom:10px">
+            <strong>${esc(s.label)}</strong> opens today
+          </div>`).join("")}
 
         ${myVisits.length ? `<div style="font-size:12px;color:var(--gold);margin-bottom:10px">✓ You're on for this day</div>` : ""}
 
@@ -6193,6 +6330,36 @@ const AUTO_FEED_TYPES = {
   contest:  (d) => `🏆 <strong>${esc(d.winnerName)}</strong> won the ${Number(d.year) || ""} ${esc(d.contestLabel)} contest with ${esc(d.measure)}!`
 };
 
+// Season-opener announcements — the one auto-generated thing the app itself
+// posts into the message feed (everything else auto-generated lives in the
+// bell only). Deterministic doc id means every member's client can safely
+// run this check on entry without risking a duplicate post.
+async function checkSeasonAnnouncements() {
+  if (!userProfile) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const reminderDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  for (const s of SEASON_DEFAULTS) {
+    if (s.start === today) await postSeasonAnnouncement(s, "opens");
+    else if (s.start === reminderDate) await postSeasonAnnouncement(s, "reminder");
+  }
+}
+
+async function postSeasonAnnouncement(s, kind) {
+  const year = new Date(s.start + "T12:00:00").getFullYear();
+  const seasonId = s.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const docId = `season_${seasonId}_${year}_${kind}`;
+  try {
+    const ref = doc(db, "feed", docId);
+    if ((await getDoc(ref)).exists()) return;
+    await setDoc(ref, {
+      type: "season", isAuto: true, uid: null, announceKind: kind,
+      seasonLabel: s.label, seasonIcon: s.icon, seasonGroup: s.group,
+      start: s.start, end: s.end,
+      createdAt: serverTimestamp(), reactions: {}, comments: []
+    });
+  } catch (err) { console.error("Season announcement:", err); }
+}
+
 async function postAutoFeedEvent(type, data) {
   try {
     await addDoc(collection(db, "feed"), {
@@ -6217,6 +6384,7 @@ window.renderFeedScreen = function () {
   content.innerHTML = `
     <!-- Compose bar (inline, expands in place — no popup) -->
     <div id="feed-compose-wrap">${userProfile ? feedComposerCollapsedHTML() : ""}</div>
+    <div id="feed-season-banners"></div>
     <div id="feed-list" style="padding:12px 16px 80px">
       <div style="text-align:center;padding:40px;color:var(--text-muted)">
         <div class="spinner" style="margin:0 auto 12px"></div>
@@ -6225,7 +6393,46 @@ window.renderFeedScreen = function () {
     </div>
   `;
   loadFeed();
+  loadSeasonBanners();
 };
+
+// Season-opener announcements pinned above the scrolling feed — the app's
+// one exception to "auto content lives in the bell, not the feed." Only
+// shows the last couple weeks' worth so it doesn't grow forever.
+function seasonBannerHTML(post) {
+  const kindText = post.announceKind === "reminder" ? "opens in 3 days" : "opens today";
+  return `
+    <div style="display:flex;align-items:center;gap:10px;background:rgba(196,169,106,0.12);
+                border:1px solid var(--gold-dim);border-radius:var(--radius-md);
+                padding:10px 14px;margin-bottom:8px">
+      <span style="font-size:18px;flex-shrink:0">${post.seasonIcon || "📆"}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--text-warm)">
+          <strong>${esc(post.seasonLabel)}</strong> ${kindText}
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:1px">
+          ${esc(seasonDateLabel(post.start))} – ${esc(seasonDateLabel(post.end))}
+        </div>
+      </div>
+      <button onclick="goTo('screen-seasons')" style="background:none;border:none;color:var(--gold);
+        font-size:11px;text-decoration:underline;cursor:pointer;flex-shrink:0;white-space:nowrap">View Seasons</button>
+    </div>`;
+}
+
+async function loadSeasonBanners() {
+  const el = document.getElementById("feed-season-banners");
+  if (!el) return;
+  try {
+    const q = query(collection(db, "feed"), where("type", "==", "season"));
+    const snap = await getDocs(q);
+    const cutoff = Date.now() - 14 * 86400000;
+    const posts = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(p => (p.createdAt?.toMillis ? p.createdAt.toMillis() : 0) > cutoff)
+      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+    el.innerHTML = posts.map(seasonBannerHTML).join("");
+  } catch (err) { console.error("Season banners:", err); }
+}
 
 function feedComposerCollapsedHTML() {
   return `
@@ -6611,7 +6818,9 @@ function ordinal(n) {
 }
 function emptyMemberStats(uid) {
   return { uid, harvests: 0, bucks: 0, does: 0, points: 0, heaviest: 0, bestRack: 0,
-           longestBeard: 0, longestSpur: 0, bears: 0, heaviestBear: 0, waterfowl: 0, smallgame: 0,
+           widestRack: 0, mostPoints: 0, heaviestBuck: 0,
+           longestBeard: 0, longestSpur: 0, turkeys: 0, heaviestTurkey: 0,
+           bears: 0, heaviestBear: 0, waterfowl: 0, smallgame: 0,
            byYear: {}, bucksByYear: {}, years: new Set(), first: null };
 }
 
@@ -6633,11 +6842,17 @@ function computeTrophyStats(cache) {
     if (isDoe(h))  { m.does++; }
     const w = Number(h.weight) || 0;
     if (w > m.heaviest) m.heaviest = w;
-    if (isBuck(h)) { const r = Number(h.rackScore) || 0; if (r > m.bestRack) m.bestRack = r; }
+    if (isBuck(h)) {
+      const r = Number(h.rackScore) || 0; if (r > m.bestRack) m.bestRack = r;
+      const spread = Number(h.insideSpread) || 0; if (spread > m.widestRack) m.widestRack = spread;
+      const pts = Number(h.antlerPoints) || 0; if (pts > m.mostPoints) m.mostPoints = pts;
+      if (w > m.heaviestBuck) m.heaviestBuck = w;
+    }
     const bl = Number(h.beardLength) || 0;
     if (bl > m.longestBeard) m.longestBeard = bl;
     const spur = Math.max(Number(h.spurLeft) || 0, Number(h.spurRight) || 0);
     if (spur > m.longestSpur) m.longestSpur = spur;
+    if (h.species === "turkey")    { m.turkeys++; if (w > m.heaviestTurkey) m.heaviestTurkey = w; }
     if (h.species === "bear")      { m.bears++; if (w > m.heaviestBear) m.heaviestBear = w; }
     if (h.species === "waterfowl") m.waterfowl += Number(h.quantity) || 1;
     if (h.species === "smallgame") m.smallgame += Number(h.quantity) || 1;
@@ -6672,8 +6887,13 @@ function computeTrophyStats(cache) {
     points:     rank(m => m.points),
     heaviest:   rank(m => m.heaviest),
     bestRack:   rank(m => m.bestRack),
+    widestRack: rank(m => m.widestRack),
+    mostPoints: rank(m => m.mostPoints),
+    heaviestBuck: rank(m => m.heaviestBuck),
     beard:      rank(m => m.longestBeard),
     spur:       rank(m => m.longestSpur),
+    turkeys:    rank(m => m.turkeys),
+    heaviestTurkey: rank(m => m.heaviestTurkey),
     bears:      rank(m => m.bears),
     heaviestBear: rank(m => m.heaviestBear),
     waterfowl:  rank(m => m.waterfowl),
@@ -6720,6 +6940,328 @@ function computeTrophyStats(cache) {
   });
 
   return { per, rankings, yearBuckLeader, yearHarvestLeader, allBucks, firstYear, placements };
+}
+
+// Fun, specific, mostly-pointless-but-fun camp trivia — separate from the
+// per-member trophy rankings above. The kind of stat a broadcast announcer
+// digs up because it's a good story, not because it's important.
+// A member-by-name "broadcast trivia" layer, separate from the champion/
+// runner-up rankings above — the kind of oddly specific, precise-sounding
+// record an NFL announcer would dig up. Every number here is real, just
+// picked for being a fun, sharable fact rather than a competitive category.
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const SLAM_SPECIES = SPECIES.filter(s => s.id !== "other").map(s => s.id);
+
+// Wisconsin's hunting year runs Sept 1 through the last of the late seasons
+// (~Jan 31), plus the separate spring turkey window (already defined the same
+// way by turkeySeason() — Mar–Jun). Only Feb, Jul, and Aug have nothing open.
+// Dry-spell stats should only count days that actually fall inside a season,
+// so the true off-season doesn't inflate them.
+function isOffSeasonMonth(m) { return m === 1 || m === 6 || m === 7; }   // Feb(1), Jul(6), Aug(7) — 0-indexed
+function seasonDaysBetween(startMs, endMs) {
+  let count = 0;
+  for (let t = startMs + 86400000; t <= endMs; t += 86400000) {
+    if (!isOffSeasonMonth(new Date(t).getMonth())) count++;
+  }
+  return count;
+}
+
+function weekKeyOf(d) {
+  const start = new Date(d.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((d - start) / 86400000);
+  return d.getFullYear() + "-w" + Math.floor(dayOfYear / 7);
+}
+
+function computeCampStats(cache) {
+  const { harvests, members } = cache;
+  if (!harvests.length) return null;
+  const nm = uid => members[uid]?.name || "A member";
+
+  const per = {};
+  const ensure = uid => per[uid] || (per[uid] = {
+    harvests: 0, years: new Set(), speciesSet: new Set(),
+    buckScores: [], points: 0, lastMs: 0, weekCounts: {}
+  });
+
+  const bySpecies = {}, byDay = {}, byYear = {}, waterfowlTypes = {}, smallgameTypes = {}, bearColors = {};
+  const byMonth = Array(12).fill(0);
+  const yearPoints = {}, doesByDay = {}, doesByYear = {}, doesByUidYear = {}, grouseByUidYear = {};
+  const uidDayQty = {}, uidDayPoints = {}, daySpecies = {};
+  const turkeySexCounts = { tom: 0, jake: 0, hen: 0 };
+  let bucksCount = 0, doesCount = 0, firearmBucks = 0, bowBucks = 0, gunDeer = 0, bowDeer = 0;
+  let totalWeight = 0, totalAntlerScore = 0, totalPoints = 0;
+  let heaviestBuckRec = null, widestRackRec = null, heaviestTurkeyRec = null, heaviestBearRec = null;
+  let earliestCalDay = null, latestCalDay = null;
+
+  harvests.forEach(h => {
+    const uid = h.uid, m = ensure(uid);
+    const ms = harvestMillis(h), d = new Date(ms), y = harvestYear(h);
+    const dayKey = d.toISOString().slice(0, 10);
+    const pts = computeKillPoints(h);
+    const w = Number(h.weight) || 0;
+    const qty = Number(h.quantity) || 1;
+    const dateStr = formatDate(h.harvestDate);
+
+    m.harvests++; m.years.add(y); m.speciesSet.add(h.species);
+    m.lastMs = Math.max(m.lastMs, ms);
+    m.points += pts; totalPoints += pts;
+    m.weekCounts[weekKeyOf(d)] = (m.weekCounts[weekKeyOf(d)] || 0) + 1;
+    yearPoints[uid + "_" + y] = (yearPoints[uid + "_" + y] || 0) + pts;
+    uidDayQty[uid + "_" + dayKey]    = (uidDayQty[uid + "_" + dayKey]    || 0) + qty;
+    uidDayPoints[uid + "_" + dayKey] = (uidDayPoints[uid + "_" + dayKey] || 0) + pts;
+    (daySpecies[dayKey] = daySpecies[dayKey] || new Set()).add(h.species);
+
+    const md = d.getMonth() * 100 + d.getDate();
+    const mdLabel = d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+    if (!earliestCalDay || md < earliestCalDay.md) earliestCalDay = { md, label: mdLabel };
+    if (!latestCalDay || md > latestCalDay.md) latestCalDay = { md, label: mdLabel };
+
+    totalWeight += w;
+    bySpecies[h.species] = (bySpecies[h.species] || 0) + qty;
+    byDay[dayKey] = (byDay[dayKey] || 0) + 1;
+    byYear[y] = (byYear[y] || 0) + 1;
+    byMonth[d.getMonth()]++;
+
+    if (h.species === "deer") { if (h.weapon === "archery") bowDeer++; else gunDeer++; }
+
+    if (isBuck(h)) {
+      bucksCount++;
+      if (h.weapon === "archery") bowBucks++; else firearmBucks++;
+      const r = Number(h.rackScore) || 0;
+      if (r > 0) { m.buckScores.push(r); totalAntlerScore += r; }
+      if (w > 0 && (!heaviestBuckRec || w > heaviestBuckRec.value)) heaviestBuckRec = { uid, value: w, date: dateStr };
+      const spread = Number(h.insideSpread) || 0;
+      if (spread > 0 && (!widestRackRec || spread > widestRackRec.value)) widestRackRec = { uid, value: spread, date: dateStr };
+    }
+    if (isDoe(h)) {
+      doesCount++;
+      doesByDay[dayKey] = (doesByDay[dayKey] || 0) + 1;
+      doesByYear[y] = (doesByYear[y] || 0) + 1;
+      doesByUidYear[uid + "_" + y] = (doesByUidYear[uid + "_" + y] || 0) + 1;
+    }
+    if (h.species === "turkey") {
+      if (w > 0 && (!heaviestTurkeyRec || w > heaviestTurkeyRec.value)) heaviestTurkeyRec = { uid, value: w, date: dateStr };
+      if (h.turkeySex && turkeySexCounts[h.turkeySex] != null) turkeySexCounts[h.turkeySex]++;
+    }
+    if (h.species === "bear") {
+      if (w > 0 && (!heaviestBearRec || w > heaviestBearRec.value)) heaviestBearRec = { uid, value: w, date: dateStr };
+      if (h.bearColor) bearColors[h.bearColor] = (bearColors[h.bearColor] || 0) + 1;
+    }
+    if (h.species === "waterfowl" && h.waterfowlType) waterfowlTypes[h.waterfowlType] = (waterfowlTypes[h.waterfowlType] || 0) + qty;
+    if (h.species === "smallgame") {
+      if (h.smallgameType) smallgameTypes[h.smallgameType] = (smallgameTypes[h.smallgameType] || 0) + qty;
+      if (h.smallgameType === "grouse") grouseByUidYear[uid + "_" + y] = (grouseByUidYear[uid + "_" + y] || 0) + qty;
+    }
+  });
+
+  const ids = Object.keys(per);
+  const topOf = obj => Object.entries(obj).sort((a, b) => b[1] - a[1])[0] || null;
+  const topByUidKey = obj => {
+    let best = null;
+    Object.entries(obj).forEach(([key, val]) => {
+      if (!best || val > best.val) { const us = key.lastIndexOf("_"); best = { uid: key.slice(0, us), key2: key.slice(us + 1), val }; }
+    });
+    return best;
+  };
+
+  let slamLeader = null;
+  ids.forEach(uid => {
+    const n = [...per[uid].speciesSet].filter(s => SLAM_SPECIES.includes(s)).length;
+    if (n > 0 && (!slamLeader || n > slamLeader.count)) slamLeader = { uid, count: n };
+  });
+
+  let streakLeader = null;
+  ids.forEach(uid => {
+    const s = longestStreak([...per[uid].years]);
+    if (s > 1 && (!streakLeader || s > streakLeader.years)) streakLeader = { uid, years: s };
+  });
+
+  let dryLeader = null;
+  const now = Date.now();
+  ids.forEach(uid => {
+    const days = seasonDaysBetween(per[uid].lastMs, now);
+    if (days > 0 && (!dryLeader || days > dryLeader.days)) dryLeader = { uid, days };
+  });
+
+  let yearPtsLeader = null;
+  Object.entries(yearPoints).forEach(([key, pts]) => {
+    if (!yearPtsLeader || pts > yearPtsLeader.pts) {
+      const us = key.lastIndexOf("_");
+      yearPtsLeader = { uid: key.slice(0, us), year: key.slice(us + 1), pts };
+    }
+  });
+
+  let avgBuckLeader = null;
+  ids.forEach(uid => {
+    const scores = per[uid].buckScores;
+    if (scores.length >= 2) {
+      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+      if (!avgBuckLeader || avg > avgBuckLeader.avg) avgBuckLeader = { uid, avg };
+    }
+  });
+
+  let weekLeader = null;
+  ids.forEach(uid => {
+    Object.entries(per[uid].weekCounts).forEach(([, n]) => {
+      if (n > 1 && (!weekLeader || n > weekLeader.count)) weekLeader = { uid, count: n };
+    });
+  });
+
+  const doeYearHunter = topByUidKey(doesByUidYear);
+  const grouseHunter  = topByUidKey(grouseByUidYear);
+
+  let bagLeader = null;
+  Object.entries(uidDayQty).forEach(([key, qty]) => {
+    if (qty > 1 && (!bagLeader || qty > bagLeader.qty)) {
+      const us = key.lastIndexOf("_");
+      bagLeader = { uid: key.slice(0, us), dayKey: key.slice(us + 1), qty };
+    }
+  });
+
+  let dayPtsLeader = null;
+  Object.entries(uidDayPoints).forEach(([key, pts]) => {
+    if (!dayPtsLeader || pts > dayPtsLeader.pts) {
+      const us = key.lastIndexOf("_");
+      dayPtsLeader = { uid: key.slice(0, us), dayKey: key.slice(us + 1), pts };
+    }
+  });
+
+  let multiSpeciesDay = null;
+  Object.entries(daySpecies).forEach(([dayKey, set]) => {
+    if (set.size > 1 && (!multiSpeciesDay || set.size > multiSpeciesDay.count)) {
+      multiSpeciesDay = { dayKey, count: set.size, species: [...set].map(s => speciesInfo(s).label) };
+    }
+  });
+
+  const sorted = [...harvests].sort((a, b) => harvestMillis(a) - harvestMillis(b));
+  let campGap = null;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = seasonDaysBetween(harvestMillis(sorted[i - 1]), harvestMillis(sorted[i]));
+    if (gap > 0 && (!campGap || gap > campGap.days)) {
+      campGap = { days: gap, from: formatDate(sorted[i - 1].harvestDate), to: formatDate(sorted[i].harvestDate) };
+    }
+  }
+
+  const speciesLine = Object.entries(bySpecies)
+    .sort((a, b) => b[1] - a[1])
+    .map(([sp, n]) => `${n} ${speciesInfo(sp).label.toLowerCase()}${n === 1 || ["deer", "waterfowl", "smallgame"].includes(sp) ? "" : "s"}`)
+    .join(", ");
+
+  const busiestDayEntry = topOf(byDay);
+  const bestYearEntry   = topOf(byYear);
+  const topWaterfowl    = topOf(waterfowlTypes);
+  const topSmallgame    = topOf(smallgameTypes);
+  const bestMonthIdx    = byMonth.indexOf(Math.max(...byMonth));
+  const doeDayEntry     = topOf(doesByDay);
+  const doeYearEntry    = topOf(doesByYear);
+
+  const first = sorted[0];
+  const nameOf = rec => rec ? nm(rec.uid) : null;
+  const fmtDayKey = k => formatDate(new Date(k + "T12:00:00"));
+
+  return {
+    total: harvests.length, speciesLine, totalWeight, totalAntlerScore, totalPoints,
+    totalMembers: Object.keys(members).length, activeMembers: ids.length,
+    heaviestBuck: heaviestBuckRec && { name: nameOf(heaviestBuckRec), ...heaviestBuckRec },
+    widestRack:   widestRackRec   && { name: nameOf(widestRackRec),   ...widestRackRec },
+    heaviestTurkey: heaviestTurkeyRec && { name: nameOf(heaviestTurkeyRec), ...heaviestTurkeyRec },
+    heaviestBear:   heaviestBearRec   && { name: nameOf(heaviestBearRec),   ...heaviestBearRec },
+    yearPtsLeader: yearPtsLeader && { ...yearPtsLeader, name: nm(yearPtsLeader.uid) },
+    avgBuckLeader: avgBuckLeader && { ...avgBuckLeader, name: nm(avgBuckLeader.uid) },
+    slamLeader:    slamLeader    && { ...slamLeader,    name: nm(slamLeader.uid), of: SLAM_SPECIES.length },
+    streakLeader:  streakLeader  && { ...streakLeader,  name: nm(streakLeader.uid) },
+    dryLeader:     dryLeader     && { ...dryLeader,     name: nm(dryLeader.uid) },
+    weekLeader:    weekLeader    && { ...weekLeader,    name: nm(weekLeader.uid) },
+    grouseHunter:  grouseHunter  && { name: nm(grouseHunter.uid), year: grouseHunter.key2, count: grouseHunter.val },
+    bagLeader:     bagLeader     && { name: nm(bagLeader.uid), qty: bagLeader.qty, date: fmtDayKey(bagLeader.dayKey) },
+    dayPtsLeader:  dayPtsLeader  && { name: nm(dayPtsLeader.uid), pts: dayPtsLeader.pts, date: fmtDayKey(dayPtsLeader.dayKey) },
+    doeDay:  doeDayEntry  && { date: fmtDayKey(doeDayEntry[0]), count: doeDayEntry[1] },
+    doeYear: doeYearEntry && { year: doeYearEntry[0], count: doeYearEntry[1] },
+    doeYearHunter: doeYearHunter && { name: nm(doeYearHunter.uid), year: doeYearHunter.key2, count: doeYearHunter.val },
+    campGap,
+    earliestCalDay, latestCalDay,
+    multiSpeciesDay: multiSpeciesDay && { date: fmtDayKey(multiSpeciesDay.dayKey), count: multiSpeciesDay.count, species: multiSpeciesDay.species },
+    busiestDay: busiestDayEntry && { date: busiestDayEntry[0], count: busiestDayEntry[1] },
+    bestYear:   bestYearEntry   && { year: bestYearEntry[0],   count: bestYearEntry[1] },
+    bestMonth:  byMonth[bestMonthIdx] > 0 ? { name: MONTH_NAMES[bestMonthIdx], count: byMonth[bestMonthIdx] } : null,
+    first: { name: nm(first.uid), species: speciesInfo(first.species).label, date: formatDate(first.harvestDate) },
+    firearmBucks, bowBucks, bucksCount, doesCount, gunDeer, bowDeer,
+    topWaterfowl: topWaterfowl && { type: topWaterfowl[0], count: topWaterfowl[1] },
+    topSmallgame: topSmallgame && { type: topSmallgame[0], count: topSmallgame[1] },
+    turkeySexCounts, bearColors
+  };
+}
+
+function campStatsHTML(cs) {
+  if (!cs) return "";
+  const dateLong = iso => new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const sections = [];
+
+  const totals = [`<strong>${cs.total}</strong> animal${cs.total === 1 ? "" : "s"} taken at camp, all-time — ${cs.speciesLine}`];
+  if (cs.totalWeight > 0) totals.push(`<strong>${Math.round(cs.totalWeight)} lbs</strong> combined, everything ever brought back to camp`);
+  if (cs.totalAntlerScore > 0) totals.push(`<strong>${cs.totalAntlerScore.toFixed(1)}"</strong> of antler, stacked across every buck ever scored`);
+  if (cs.totalPoints > 0) totals.push(`<strong>${cs.totalPoints}</strong> kill points earned by the whole camp, combined`);
+  totals.push(`<strong>${cs.activeMembers}</strong> of ${cs.totalMembers} member${cs.totalMembers === 1 ? "" : "s"} ha${cs.activeMembers === 1 ? "s" : "ve"} put something on the board`);
+  sections.push(["Camp Totals", totals]);
+
+  const records = [];
+  if (cs.heaviestBuck) records.push(`Heaviest buck on record: <strong>${esc(cs.heaviestBuck.name)}</strong>, ${cs.heaviestBuck.value} lbs — taken ${esc(cs.heaviestBuck.date)}`);
+  if (cs.widestRack)   records.push(`Widest rack on record: <strong>${esc(cs.widestRack.name)}</strong>, ${cs.widestRack.value}" spread — taken ${esc(cs.widestRack.date)}`);
+  if (cs.heaviestTurkey) records.push(`Heaviest turkey on record: <strong>${esc(cs.heaviestTurkey.name)}</strong>, ${cs.heaviestTurkey.value} lbs — taken ${esc(cs.heaviestTurkey.date)}`);
+  if (cs.heaviestBear)   records.push(`Heaviest bear on record: <strong>${esc(cs.heaviestBear.name)}</strong>, ${cs.heaviestBear.value} lbs — taken ${esc(cs.heaviestBear.date)}`);
+  if (cs.yearPtsLeader)  records.push(`Most kill points in one year: <strong>${esc(cs.yearPtsLeader.name)}</strong>, ${cs.yearPtsLeader.pts} pts in ${cs.yearPtsLeader.year}`);
+  if (cs.dayPtsLeader)   records.push(`Most kill points in one day: <strong>${esc(cs.dayPtsLeader.name)}</strong>, ${cs.dayPtsLeader.pts} pts on ${esc(cs.dayPtsLeader.date)}`);
+  if (cs.avgBuckLeader)  records.push(`Best average buck score (2+ bucks): <strong>${esc(cs.avgBuckLeader.name)}</strong>, ${cs.avgBuckLeader.avg.toFixed(1)}" B&C average`);
+  if (cs.slamLeader)     records.push(`Camp's most versatile hunter: <strong>${esc(cs.slamLeader.name)}</strong> has taken ${cs.slamLeader.count} of ${cs.slamLeader.of} trackable species`);
+  if (cs.grouseHunter)   records.push(`Most grouse in one season: <strong>${esc(cs.grouseHunter.name)}</strong>, ${cs.grouseHunter.count} in ${cs.grouseHunter.year}`);
+  if (cs.bagLeader)      records.push(`Biggest single-day bag by one hunter: <strong>${esc(cs.bagLeader.name)}</strong>, ${cs.bagLeader.qty} animals on ${esc(cs.bagLeader.date)}`);
+  if (records.length) sections.push(["Standing Records", records]);
+
+  const doeRecords = [];
+  if (cs.doeDay && cs.doeDay.count > 1) doeRecords.push(`Most does in a single day: <strong>${cs.doeDay.count}</strong>, on ${esc(cs.doeDay.date)}`);
+  if (cs.doeYear && cs.doeYear.count > 1) doeRecords.push(`Most does in a single season, camp-wide: <strong>${cs.doeYear.count}</strong>, in ${cs.doeYear.year}`);
+  if (cs.doeYearHunter) doeRecords.push(`Most does in a season by one hunter: <strong>${esc(cs.doeYearHunter.name)}</strong>, ${cs.doeYearHunter.count} in ${cs.doeYearHunter.year}`);
+  if (doeRecords.length) sections.push(["Doe Records", doeRecords]);
+
+  const streaks = [];
+  if (cs.streakLeader) streaks.push(`Longest harvest streak: <strong>${esc(cs.streakLeader.name)}</strong>, ${cs.streakLeader.years} years running`);
+  if (cs.dryLeader && cs.dryLeader.days > 30) streaks.push(`Longest current dry spell (one hunter): <strong>${esc(cs.dryLeader.name)}</strong>, ${cs.dryLeader.days} days and counting`);
+  if (cs.campGap && cs.campGap.days > 14) streaks.push(`Camp's longest collective dry spell: <strong>${cs.campGap.days} days</strong>, from ${esc(cs.campGap.from)} to ${esc(cs.campGap.to)}`);
+  if (cs.weekLeader) streaks.push(`Most harvests in a single week: <strong>${esc(cs.weekLeader.name)}</strong>, ${cs.weekLeader.count} in one week`);
+  streaks.push(`First harvest on record: ${esc(cs.first.species)} by <strong>${esc(cs.first.name)}</strong>, ${esc(cs.first.date)}`);
+  sections.push(["Streaks & Timing", streaks]);
+
+  const calendar = [];
+  if (cs.busiestDay && cs.busiestDay.count > 1) calendar.push(`Busiest day on record: <strong>${esc(dateLong(cs.busiestDay.date))}</strong> — ${cs.busiestDay.count} animals hit the ground in one day`);
+  if (cs.bestYear && cs.bestYear.count > 1) calendar.push(`Camp's best year: <strong>${cs.bestYear.year}</strong> — ${cs.bestYear.count} harvests logged`);
+  if (cs.bestMonth) calendar.push(`Camp's best month, historically: <strong>${esc(cs.bestMonth.name)}</strong> (${cs.bestMonth.count} harvest${cs.bestMonth.count === 1 ? "" : "s"})`);
+  if (cs.earliestCalDay) calendar.push(`Earliest season-opener on record: <strong>${esc(cs.earliestCalDay.label)}</strong>`);
+  if (cs.latestCalDay && cs.latestCalDay.label !== cs.earliestCalDay?.label) calendar.push(`Latest season-closer on record: <strong>${esc(cs.latestCalDay.label)}</strong>`);
+  if (cs.multiSpeciesDay) calendar.push(`Most different species taken in one day: <strong>${cs.multiSpeciesDay.count}</strong> — ${esc(cs.multiSpeciesDay.species.join(" & "))} on ${esc(cs.multiSpeciesDay.date)}`);
+  if (calendar.length) sections.push(["Calendar", calendar]);
+
+  const breakdowns = [];
+  if (cs.gunDeer || cs.bowDeer) breakdowns.push(`${cs.gunDeer} gun deer, ${cs.bowDeer} bow deer taken all-time (bucks and does)`);
+  if (cs.firearmBucks || cs.bowBucks) breakdowns.push(`${cs.firearmBucks} firearm buck${cs.firearmBucks === 1 ? "" : "s"}, ${cs.bowBucks} bow buck${cs.bowBucks === 1 ? "" : "s"} taken all-time`);
+  if (cs.bucksCount || cs.doesCount) breakdowns.push(`${cs.bucksCount} buck${cs.bucksCount === 1 ? "" : "s"} vs. ${cs.doesCount} doe${cs.doesCount === 1 ? "" : "s"} taken all-time`);
+  const { tom, jake, hen } = cs.turkeySexCounts;
+  if (tom || jake || hen) breakdowns.push(`Turkey breakdown: ${tom} tom${tom === 1 ? "" : "s"}, ${jake} jake${jake === 1 ? "" : "s"}, ${hen} hen${hen === 1 ? "" : "s"}`);
+  if (cs.topWaterfowl) breakdowns.push(`Most-bagged waterfowl at camp: <strong>${esc(cs.topWaterfowl.type)}</strong> (${cs.topWaterfowl.count} taken)`);
+  if (cs.topSmallgame) breakdowns.push(`Most-bagged small game at camp: <strong>${esc(cs.topSmallgame.type)}</strong> (${cs.topSmallgame.count} taken)`);
+  const bearEntries = Object.entries(cs.bearColors);
+  if (bearEntries.length) breakdowns.push(`Bear color phases: ${bearEntries.map(([c, n]) => `${n} ${c}`).join(", ")}`);
+  if (breakdowns.length) sections.push(["Breakdowns", breakdowns]);
+
+  return `
+    <div style="background:var(--forest-card);border:1px solid var(--card-border);border-radius:12px;padding:14px 16px;margin-bottom:18px">
+      <div style="font-family:var(--font-serif);font-size:15px;color:var(--gold);margin-bottom:6px">Camp Stats</div>
+      ${sections.map(([label, lines]) => `
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:12px 0 4px;
+                    border-top:1px solid var(--card-border);padding-top:10px">${esc(label)}</div>
+        ${lines.map((l, i) => `
+          <div style="font-size:13px;color:var(--text-warm);line-height:1.5;padding:6px 0;
+                      ${i < lines.length - 1 ? "border-bottom:1px solid var(--card-border)" : ""}">${l}</div>`).join("")}`).join("")}
+    </div>`;
 }
 
 // ---- small render helpers ----
@@ -7120,19 +7662,24 @@ window.renderMasterTrophyRoom = async function () {
     };
 
     const allCats = [
-      ["🏆", "Most trophies",       stats.rankings.harvests,     ""],
-      ["🦌", "Most bucks",          stats.rankings.bucks,        ""],
-      ["⭐",  "Most kill points",    stats.rankings.points,       " pts"],
-      ["🦌", "Biggest buck",        stats.rankings.bestRack,     '"'],
-      ["⚖️", "Heaviest animal",     stats.rankings.heaviest,     " lbs"],
-      ["🦌", "Most does",           stats.rankings.does,         ""],
-      ["🦃", "Longest beard",       stats.rankings.beard,        '"'],
-      ["🦃", "Longest spurs",       stats.rankings.spur,         '"'],
-      ["🐻", "Most bears",          stats.rankings.bears,        ""],
-      ["🐻", "Heaviest bear",       stats.rankings.heaviestBear, " lbs"],
-      ["🦆", "Most waterfowl",      stats.rankings.waterfowl,    ""],
-      ["🐇", "Most small game",     stats.rankings.smallgame,    ""],
-      ["📅", "Best single season",  stats.rankings.bestSeason,   ""]
+      ["🏆", "Most trophies",              stats.rankings.harvests,      ""],
+      ["⭐",  "Most kill points",           stats.rankings.points,        " pts"],
+      ["📅", "Best single season",         stats.rankings.bestSeason,    ""],
+      ["🦌", "Most bucks",                 stats.rankings.bucks,         ""],
+      ["🦌", "Most does",                  stats.rankings.does,          ""],
+      ["🎯", "Biggest Rack (B&C Score)",   stats.rankings.bestRack,      '"'],
+      ["📏", "Widest Rack (Spread)",       stats.rankings.widestRack,    '"'],
+      ["🔟", "Most Antler Points",         stats.rankings.mostPoints,    " pts"],
+      ["⚖️", "Heaviest Buck",              stats.rankings.heaviestBuck,  " lbs"],
+      ["🦃", "Most Turkeys",               stats.rankings.turkeys,       ""],
+      ["🦃", "Longest Beard",              stats.rankings.beard,         '"'],
+      ["🦃", "Longest Spurs",              stats.rankings.spur,          '"'],
+      ["🦃", "Heaviest Turkey",            stats.rankings.heaviestTurkey," lbs"],
+      ["🐻", "Most Bears",                 stats.rankings.bears,         ""],
+      ["🐻", "Heaviest Bear",              stats.rankings.heaviestBear,  " lbs"],
+      ["🦆", "Most Waterfowl",             stats.rankings.waterfowl,     ""],
+      ["🐇", "Most Small Game",            stats.rankings.smallgame,     ""],
+      ["⚖️", "Heaviest Animal (Any Species)", stats.rankings.heaviest,   " lbs"]
     ];
     const cats      = allCats.filter(([, , list]) => list.length);
     const unclaimed = allCats.filter(([, , list]) => !list.length);
@@ -7155,8 +7702,11 @@ window.renderMasterTrophyRoom = async function () {
     });
     const unclaimedContests = Object.entries(CONTESTS).filter(([id]) => !claimedContestKeys.has(id));
 
+    const campStats = computeCampStats(cache);
+
     el.innerHTML = `
       <div style="padding:14px 16px 90px">
+        ${campStatsHTML(campStats)}
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">
           The champion and the runner-up in every category. Updates as members log harvests.
         </div>
