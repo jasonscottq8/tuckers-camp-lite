@@ -350,6 +350,25 @@ Three small follow-ups from the user's first look at the 2.19.0 chat bubbles.
    right-aligned and everyone else's render left-aligned, symmetrically. No
    change needed, just confirmed via a two-sender fixture in the sandbox.
 
+### Bubble alignment fix — SHIPPED in lite-2.19.2
+
+Once the user actually looked at their own real message history, the
+alignment confirmation above turned out to be missing a real bug: bubbles
+were sitting inconsistent distances from the avatar — "some pills next to my
+name badge, some a few spaces away, giving it a twisted look." Root cause:
+the content column (`<div style="min-width:0">` wrapping the bubble + photo +
+meta line) was a plain block, so its rendered width was driven by whichever
+child was WIDEST — for a short message ("Ok!", "Yep") with a longer meta line
+below it (reactions + reply count + date), that meta line's width won, and
+the bubble — a left-aligned `inline-block` by default — sat flush-left inside
+that wider column instead of hugging the avatar. Looked fine for long
+messages (bubble = widest child) and broken for short ones. Fixed by making
+the content column `display:flex;flex-direction:column;align-items:flex-end`
+(own messages) or `flex-start` (others') so every child — bubble, photo, meta
+line — aligns to the same edge as the avatar, regardless of which one is
+widest. Verified with a fixture mixing short/long messages and reaction
+counts side by side; every bubble now sits flush against the avatar.
+
 ### Trophy Room — SHIPPED in lite-2.10.0 (commit `98a784c`)
 
 Built: `renderTrophyRoom` (stat-card feed, camp rankings, by-year bars, award
@@ -360,8 +379,8 @@ are derived live from `contestEntries` sorted per closed season — no
 `closeContest` schema change was needed.
 
 Follow-up polish (do later):
-- More cards: bear stats, trail-cam photos contributed, "first tag filled this
-  year" race, biggest-doe-by-weight.
+- More cards: trail-cam photos contributed, "first tag filled this year" race,
+  biggest-doe-by-weight. (Bear stats — DONE in lite-2.20.0, see below.)
 - Real charts beyond the by-year bars — a rack-size trend line, seasonality by
   month. Still hand-rolled SVG.
 - Let members pin favourite cards to the top.
@@ -370,6 +389,30 @@ Follow-up polish (do later):
   Cloud Function.
 - `trophyStatCard` bars/points have `title` tooltips but no `<title>` SVG — add
   when the SVG charts land.
+
+### Cabin Trophy Room — more categories + "Not claimed yet" — SHIPPED in lite-2.20.0
+
+User's ask: more categories, and any category/contest nobody's claimed yet
+should still be visible so members can see every possible trophy, not just
+the ones already won. Closed the species gap first — bear, waterfowl, and
+small game had ZERO categories before this (only deer/turkey were covered).
+`emptyMemberStats`/`computeTrophyStats` gained `bears`/`heaviestBear`/
+`waterfowl`/`smallgame` fields (waterfowl/smallgame count by `quantity`, bear
+tracks count + heaviest weight) and matching `rankings` entries. `allCats` in
+`renderMasterTrophyRoom` is now 13 categories (was 9), each tagged with an
+icon; split into `cats` (at least one member has an entry — rendered as
+before, champion+runner-up) and `unclaimed` (zero entries — rendered in a new
+dashed-border "Not claimed yet" list, icon dimmed, "no one yet" instead of a
+name). Contests got the same treatment: `unclaimedContests` = every
+`CONTESTS` entry with no closed-season row this session, listed under the same
+"Not claimed yet" block as "not closed yet" (distinguishing a contest that's
+simply still open for the year from a stat category nobody's ever touched).
+Verified via a temporary `window.__debugTrophyCache(cache)` hook (bypasses the
+real `loadTrophyData()` Firestore call by pre-seeding `trophyCache`, removed
+after) with a small fixture — buck/doe/turkey/bear harvests split across two
+members — confirmed bear categories populate correctly, waterfowl/small game
+(no test data) correctly fall into "Not claimed yet" alongside all 5
+not-yet-closed contests.
 
 ## Also noted (minor, no rush)
 

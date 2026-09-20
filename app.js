@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.19.1";
+const APP_VERSION = "lite-2.20.0";
 
 
 
@@ -1568,6 +1568,13 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.20.0", date: "Sep 2026", notes: [
+      "Cabin Trophy Room now tracks bears, waterfowl, and small game too, not just deer and turkey",
+      "Categories nobody's claimed yet — and contests that haven't been closed for the year — now show in a \"Not claimed yet\" list, so you can see every trophy that's up for grabs"
+    ]},
+    { version: "lite-2.19.2", date: "Sep 2026", notes: [
+      "Fixed feed messages sitting a bit crooked next to your avatar — they now line up flush every time"
+    ]},
     { version: "lite-2.19.1", date: "Sep 2026", notes: [
       "Removed the floating + button from the Feed — the compose bar at the top covers it",
       "Added faint dividers between feed messages so short back-and-forth replies don't run together",
@@ -6390,7 +6397,7 @@ function feedPostCard(post) {
         <div class="avatar" style="background:${tint};width:36px;height:36px;font-size:13px;flex-shrink:0">
           ${esc(post.initials || "?")}</div>
 
-        <div style="min-width:0">
+        <div style="min-width:0;display:flex;flex-direction:column;align-items:${isMine ? "flex-end" : "flex-start"}">
           <div onclick="toggleFeedComments('${post.id}')" style="display:inline-block;max-width:100%;background:${colorTint(tint, 0.16)};border:1px solid ${colorTint(tint, 0.35)};border-radius:var(--radius-xl);padding:10px 16px;font-size:13px;color:var(--text-warm);line-height:1.4;white-space:pre-wrap;word-break:break-word;cursor:pointer">${esc(post.text || "").trim()}</div>
           ${post.photoURL ? `<img src="${esc(post.photoURL)}"
             style="max-width:100%;border-radius:12px;margin-top:4px;display:block" />` : ""}
@@ -6604,7 +6611,8 @@ function ordinal(n) {
 }
 function emptyMemberStats(uid) {
   return { uid, harvests: 0, bucks: 0, does: 0, points: 0, heaviest: 0, bestRack: 0,
-           longestBeard: 0, longestSpur: 0, byYear: {}, bucksByYear: {}, years: new Set(), first: null };
+           longestBeard: 0, longestSpur: 0, bears: 0, heaviestBear: 0, waterfowl: 0, smallgame: 0,
+           byYear: {}, bucksByYear: {}, years: new Set(), first: null };
 }
 
 function computeTrophyStats(cache) {
@@ -6630,6 +6638,9 @@ function computeTrophyStats(cache) {
     if (bl > m.longestBeard) m.longestBeard = bl;
     const spur = Math.max(Number(h.spurLeft) || 0, Number(h.spurRight) || 0);
     if (spur > m.longestSpur) m.longestSpur = spur;
+    if (h.species === "bear")      { m.bears++; if (w > m.heaviestBear) m.heaviestBear = w; }
+    if (h.species === "waterfowl") m.waterfowl += Number(h.quantity) || 1;
+    if (h.species === "smallgame") m.smallgame += Number(h.quantity) || 1;
     m.byYear[y] = (m.byYear[y] || 0) + 1;
     m.years.add(y);
     if (m.first === null || y < m.first) m.first = y;
@@ -6663,6 +6674,10 @@ function computeTrophyStats(cache) {
     bestRack:   rank(m => m.bestRack),
     beard:      rank(m => m.longestBeard),
     spur:       rank(m => m.longestSpur),
+    bears:      rank(m => m.bears),
+    heaviestBear: rank(m => m.heaviestBear),
+    waterfowl:  rank(m => m.waterfowl),
+    smallgame:  rank(m => m.smallgame),
     bestSeason: rank(m => Math.max(0, ...Object.values(m.byYear))),
     streak:     rank(m => longestStreak([...m.years]))
   };
@@ -7104,19 +7119,26 @@ window.renderMasterTrophyRoom = async function () {
       </div>`;
     };
 
-    const cats = [
-      ["Most trophies",       stats.rankings.harvests,   ""],
-      ["Most bucks",          stats.rankings.bucks,      ""],
-      ["Most kill points",    stats.rankings.points,     " pts"],
-      ["Biggest buck",        stats.rankings.bestRack,   '"'],
-      ["Heaviest animal",     stats.rankings.heaviest,   " lbs"],
-      ["Most does",           stats.rankings.does,       ""],
-      ["Longest beard",       stats.rankings.beard,      '"'],
-      ["Longest spurs",       stats.rankings.spur,       '"'],
-      ["Best single season",  stats.rankings.bestSeason, ""]
-    ].filter(([, list]) => list.length);
+    const allCats = [
+      ["🏆", "Most trophies",       stats.rankings.harvests,     ""],
+      ["🦌", "Most bucks",          stats.rankings.bucks,        ""],
+      ["⭐",  "Most kill points",    stats.rankings.points,       " pts"],
+      ["🦌", "Biggest buck",        stats.rankings.bestRack,     '"'],
+      ["⚖️", "Heaviest animal",     stats.rankings.heaviest,     " lbs"],
+      ["🦌", "Most does",           stats.rankings.does,         ""],
+      ["🦃", "Longest beard",       stats.rankings.beard,        '"'],
+      ["🦃", "Longest spurs",       stats.rankings.spur,         '"'],
+      ["🐻", "Most bears",          stats.rankings.bears,        ""],
+      ["🐻", "Heaviest bear",       stats.rankings.heaviestBear, " lbs"],
+      ["🦆", "Most waterfowl",      stats.rankings.waterfowl,    ""],
+      ["🐇", "Most small game",     stats.rankings.smallgame,    ""],
+      ["📅", "Best single season",  stats.rankings.bestSeason,   ""]
+    ];
+    const cats      = allCats.filter(([, , list]) => list.length);
+    const unclaimed = allCats.filter(([, , list]) => !list.length);
 
     const contestRows = [];
+    const claimedContestKeys = new Set();
     const allStandings = computeContestStandings(cache);
     Object.entries(cache.contestMeta).forEach(([key, meta]) => {
       if (!meta.closed) return;
@@ -7126,17 +7148,39 @@ window.renderMasterTrophyRoom = async function () {
       const entries = (allStandings[key] || [])
         .filter(s => s.score != null)
         .map(s => ({ uid: s.uid, value: s.score }));
-      if (entries.length) contestRows.push(row(`${c?.label || contest} · ${year}`, entries, "", v => contestValueStr(contest, v)));
+      if (entries.length) {
+        claimedContestKeys.add(contest);
+        contestRows.push(row(`${c?.label || contest} · ${year}`, entries, "", v => contestValueStr(contest, v)));
+      }
     });
+    const unclaimedContests = Object.entries(CONTESTS).filter(([id]) => !claimedContestKeys.has(id));
 
     el.innerHTML = `
       <div style="padding:14px 16px 90px">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">
           The champion and the runner-up in every category. Updates as members log harvests.
         </div>
-        ${cats.length ? cats.map(([l, list, u]) => row(l, list, u)).join("")
+        ${cats.length ? cats.map(([, l, list, u]) => row(l, list, u)).join("")
           : `<div style="color:var(--text-dim);font-size:13px;font-style:italic;padding:20px 0;text-align:center">No harvests logged at camp yet.</div>`}
         ${contestRows.length ? `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:18px 0 8px">Contest champions</div>${contestRows.join("")}` : ""}
+        ${unclaimed.length || unclaimedContests.length ? `
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:18px 0 8px">Not claimed yet</div>
+          <div style="background:var(--forest-card);border:1px dashed var(--card-border);border-radius:12px;padding:4px 14px">
+            ${unclaimed.map(([icon, l], i) => `
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
+                          ${i === unclaimed.length - 1 && !unclaimedContests.length ? "" : "border-bottom:1px solid var(--card-border)"}">
+                <span style="font-size:15px;opacity:0.6">${icon}</span>
+                <span style="flex:1;font-size:13px;color:var(--text-muted)">${esc(l)}</span>
+                <span style="font-size:11px;color:var(--text-dim);font-style:italic">no one yet</span>
+              </div>`).join("")}
+            ${unclaimedContests.map(([, c], i) => `
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
+                          ${i === unclaimedContests.length - 1 ? "" : "border-bottom:1px solid var(--card-border)"}">
+                <span style="font-size:15px;opacity:0.6">${c.icon}</span>
+                <span style="flex:1;font-size:13px;color:var(--text-muted)">${esc(c.label)}</span>
+                <span style="font-size:11px;color:var(--text-dim);font-style:italic">not closed yet</span>
+              </div>`).join("")}
+          </div>` : ""}
         <button class="btn btn-secondary btn-sm btn-full" style="margin-top:10px" onclick="goTo('screen-mykills')">← My Trophy Room</button>
       </div>`;
   } catch (err) {
