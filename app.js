@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.22.0";
+const APP_VERSION = "lite-2.22.1";
 
 
 
@@ -1577,6 +1577,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.22.1", date: "Sep 2026", notes: [
+      "Cabin Trophy Room now shows the trophies first — Camp Stats moved to the bottom"
+    ]},
     { version: "lite-2.22.0", date: "Sep 2026", notes: [
       "New Seasons page (in the hamburger menu) — every Wisconsin DNR season and its dates, with what's open right now highlighted",
       "The app now posts a heads-up when a season opens (and a 3-day reminder before) — in the bell, the calendar, and as the one automatic post the message feed still gets",
@@ -7706,7 +7709,6 @@ window.renderMasterTrophyRoom = async function () {
 
     el.innerHTML = `
       <div style="padding:14px 16px 90px">
-        ${campStatsHTML(campStats)}
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">
           The champion and the runner-up in every category. Updates as members log harvests.
         </div>
@@ -7731,6 +7733,7 @@ window.renderMasterTrophyRoom = async function () {
                 <span style="font-size:11px;color:var(--text-dim);font-style:italic">not closed yet</span>
               </div>`).join("")}
           </div>` : ""}
+        ${campStatsHTML(campStats)}
         <button class="btn btn-secondary btn-sm btn-full" style="margin-top:10px" onclick="goTo('screen-mykills')">← My Trophy Room</button>
       </div>`;
   } catch (err) {
