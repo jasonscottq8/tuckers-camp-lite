@@ -680,6 +680,34 @@ a live Firestore listener) — confirmed the home card, day-popup header,
 roster badges, and a multi-day checked-in visitor card all render icon-free
 text end to end; all three removed after.
 
+### Wizard choice-button centering — SHIPPED in lite-2.24.1
+
+Immediate follow-up once the user actually looked at the icon-free wizards.
+Quote: "the pill buttons in the harvest wizard, for example, have a long pill
+for the word Deer, left aligned, and somehow it looks awkward as hell." A
+`display:flex;align-items:center;text-align:left` pill that used to hold an
+icon + word now holds one lone word floating at the left edge of a wide
+button — the icon had been doing double duty as a visual anchor. Recommended
+centering over shrinking the pills (shrinking would need flex-wrap for the
+2-3-option rows and breaks the established "big, easy-to-tap, one-per-line"
+wizard pattern); user agreed, then asked to make it uniform across both
+wizards. Fixed `hvChoiceBtn` (harvest wizard — every species/buck-doe/weapon/
+turkey/bear/waterfowl/smallgame/other picker, all 13 call sites, since they
+share one function) and the calendar wizard's purpose-picker step (`"What are
+you headed up for?"`, the only single-column list there) — both switched from
+`text-align:left` to `justify-content:center;text-align:center`, staying
+full-width. The calendar wizard's OTHER step (`"When are you coming?"`,
+day-part) turned out to already be centered — it's a 2-column grid with
+`flex-direction:column;align-items:center`, which centers on its own
+regardless of icon presence, so it never had this bug. Verified via
+screenshot at both desktop and 375px mobile width using the usual
+`window.__debugSetUser`/`__debugEnterApp` hooks (removed after) — confirmed
+"Deer"/"Buck"/"Doe" and "Hunting"/"Scouting"/etc. all read as centered,
+deliberate button labels now instead of stray left-aligned text. User also
+confirmed liking the wizard modals' existing dark background against the
+blaze-orange accent buttons elsewhere on screen — noted so a future pass
+doesn't flatten/lighten that contrast.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,

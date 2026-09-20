@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.24.0";
+const APP_VERSION = "lite-2.24.1";
 
 
 
@@ -1574,6 +1574,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.24.1", date: "Sep 2026", notes: [
+      "Centered the text on the harvest and calendar wizards' choice buttons — they'd gone lopsided since losing their icons"
+    ]},
     { version: "lite-2.24.0", date: "Sep 2026", notes: [
       "Removed every icon from the Calendar — weather, moon phase, visit purpose, time of day, and multi-day stay tags are all plain text now",
       "The \"headed up for\" and \"when are you coming\" calendar buttons are text-only, no icons"
@@ -3966,9 +3969,9 @@ const HV_PATHS = {
 
 function hvChoiceBtn(onclick, label) {
   return `<button type="button" onclick="${onclick}"
-    style="display:flex;align-items:center;padding:15px 14px;border-radius:var(--radius-md);
+    style="display:flex;align-items:center;justify-content:center;padding:15px 14px;border-radius:var(--radius-md);
            background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);
-           font-size:15px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:left">
+           font-size:15px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:center">
     ${esc(label)}
   </button>`;
 }
@@ -5519,9 +5522,9 @@ function wizardStepHTML(step) {
       <div style="display:flex;flex-direction:column;gap:8px">
         ${Object.entries(VISIT_PURPOSES).map(([k, m]) => `
           <button type="button" onclick="calWizardPick('purpose','${k}')"
-            style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:var(--radius-md);
+            style="display:flex;align-items:center;justify-content:center;padding:13px 14px;border-radius:var(--radius-md);
                    background:rgba(255,255,255,0.05);border:1px solid var(--card-border);color:var(--text-warm);
-                   font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:left">
+                   font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-sans);text-align:center">
             ${m.label}
           </button>`).join("")}
       </div>
