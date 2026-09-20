@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.25.0";
+const APP_VERSION = "lite-2.26.0";
 
 
 
@@ -1575,6 +1575,12 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.26.0", date: "Sep 2026", notes: [
+      "New Trapping category on the Seasons page — coyote, fox, raccoon, fisher, bobcat, otter, beaver, and mink/muskrat, by zone"
+    ]},
+    { version: "lite-2.25.1", date: "Sep 2026", notes: [
+      "Seasons page now includes mourning dove, snipe, rail, gallinule, crow, Hungarian partridge, bobwhite quail, the Open Water duck zone, coot, and the Mississippi goose zone — all missing before"
+    ]},
     { version: "lite-2.25.0", date: "Sep 2026", notes: [
       "Calendar RSVP button now says \"I'm in\" instead of the old mouthful",
       "Moon phase icons are back on the calendar",
@@ -1907,11 +1913,13 @@ const SEASON_GROUPS = {
   bear:      { label: "Bear" },
   turkey:    { label: "Turkey" },
   smallgame: { label: "Small Game & Upland Birds" },
-  waterfowl: { label: "Waterfowl" }
+  waterfowl: { label: "Waterfowl" },
+  trapping:  { label: "Trapping" }
 };
 const SEASON_DEFAULTS = [
   { group: "deer", icon: "🏹", label: "Archery & Crossbow",              start: "2026-09-12", end: "2027-01-03" },
   { group: "deer", icon: "🏹", label: "Archery & Crossbow (Extended)",   start: "2026-09-12", end: "2027-01-31" },
+  { group: "deer", icon: "🔫", label: "Gun Hunt for Hunters with Disabilities (select land only)", start: "2026-10-03", end: "2026-10-11" },
   { group: "deer", icon: "🔫", label: "Youth & Disabled Gun Hunt",       start: "2026-10-10", end: "2026-10-11" },
   { group: "deer", icon: "🔫", label: "Gun Deer (Regular)",              start: "2026-11-21", end: "2026-11-29" },
   { group: "deer", icon: "🔫", label: "Gun Deer (Metro Subunits)",       start: "2026-11-21", end: "2026-12-09" },
@@ -1938,17 +1946,52 @@ const SEASON_DEFAULTS = [
   { group: "smallgame", icon: "🌲", label: "Ruffed Grouse — Zone A (North)", start: "2026-09-12", end: "2027-01-03" },
   { group: "smallgame", icon: "🌲", label: "Ruffed Grouse — Zone B",     start: "2026-10-17", end: "2026-12-08" },
   { group: "smallgame", icon: "🐦", label: "Woodcock",                   start: "2026-09-19", end: "2026-11-02" },
+  { group: "smallgame", icon: "🕊️", label: "Mourning Dove",               start: "2026-09-01", end: "2026-11-29" },
+  { group: "smallgame", icon: "🐦", label: "Wilson's Snipe",              start: "2026-09-01", end: "2026-11-09" },
+  { group: "smallgame", icon: "🐦", label: "Rail (Virginia, Sora)",       start: "2026-09-01", end: "2026-11-09" },
+  { group: "smallgame", icon: "🐦", label: "Common Gallinule",            start: "2026-09-01", end: "2026-11-09" },
+  { group: "smallgame", icon: "🐦", label: "Hungarian Partridge",         start: "2026-10-17", end: "2027-01-03" },
+  { group: "smallgame", icon: "🐦", label: "Bobwhite Quail",              start: "2026-10-17", end: "2026-12-09" },
+  { group: "smallgame", icon: "🐦", label: "Crow",                        start: "2026-11-21", end: "2027-03-24" },
 
   { group: "waterfowl", icon: "🦆", label: "Early Teal",                 start: "2026-09-01", end: "2026-09-09" },
   { group: "waterfowl", icon: "🦆", label: "Youth Waterfowl Hunt",       start: "2026-09-19", end: "2026-09-20" },
   { group: "waterfowl", icon: "🦆", label: "Duck — Northern Zone",       start: "2026-09-26", end: "2026-11-24" },
   { group: "waterfowl", icon: "🦆", label: "Duck — Southern Zone (Split 1)", start: "2026-10-03", end: "2026-10-11" },
   { group: "waterfowl", icon: "🦆", label: "Duck — Southern Zone (Split 2)", start: "2026-10-17", end: "2026-12-06" },
+  { group: "waterfowl", icon: "🦆", label: "Duck — Open Water Zone",     start: "2026-10-17", end: "2026-12-15" },
+  { group: "waterfowl", icon: "🦆", label: "Coot — Northern Zone",       start: "2026-09-26", end: "2026-11-24" },
+  { group: "waterfowl", icon: "🦆", label: "Coot — Southern Zone (Split 1)", start: "2026-10-03", end: "2026-10-11" },
+  { group: "waterfowl", icon: "🦆", label: "Coot — Southern Zone (Split 2)", start: "2026-10-17", end: "2026-12-06" },
+  { group: "waterfowl", icon: "🦆", label: "Coot — Open Water Zone",     start: "2026-10-17", end: "2026-12-15" },
   { group: "waterfowl", icon: "🦆", label: "Early Goose",                start: "2026-09-01", end: "2026-09-15" },
   { group: "waterfowl", icon: "🦆", label: "Goose — Northern Zone",      start: "2026-09-16", end: "2026-12-16" },
   { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 1)", start: "2026-09-16", end: "2026-10-11" },
   { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 2)", start: "2026-10-17", end: "2026-12-06" },
-  { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 3)", start: "2026-12-19", end: "2027-01-02" }
+  { group: "waterfowl", icon: "🦆", label: "Goose — Southern Zone (Split 3)", start: "2026-12-19", end: "2027-01-02" },
+  { group: "waterfowl", icon: "🦆", label: "Goose — Mississippi Zone (Split 1)", start: "2026-10-03", end: "2026-10-11" },
+  { group: "waterfowl", icon: "🦆", label: "Goose — Mississippi Zone (Split 2)", start: "2026-10-17", end: "2027-01-05" },
+
+  // Trapping dates are separate from the hunting dates above even for species
+  // that allow both (e.g. coyote/fox) — sourced from dnr.wisconsin.gov/topic/trap/dates.
+  // Wolf and the open "Other" species (opossum, skunk, weasel, porcupine,
+  // snowshoe hare, woodchuck — no closed season) are left off since there's
+  // no dated season to show.
+  { group: "trapping", icon: "🐾", label: "Coyote",                      start: "2026-10-17", end: "2027-02-15" },
+  { group: "trapping", icon: "🐾", label: "Fox",                         start: "2026-10-17", end: "2027-02-15" },
+  { group: "trapping", icon: "🐾", label: "Raccoon",                     start: "2026-10-17", end: "2027-02-15" },
+  { group: "trapping", icon: "🐾", label: "Fisher (permit required)",    start: "2026-10-17", end: "2027-01-03" },
+  { group: "trapping", icon: "🐾", label: "Bobcat (Period 1, permit required)", start: "2026-10-17", end: "2026-12-25" },
+  { group: "trapping", icon: "🐾", label: "Bobcat (Period 2, permit required)", start: "2026-12-26", end: "2027-01-31" },
+  { group: "trapping", icon: "🐾", label: "Otter — North Zone (quota)",  start: "2026-11-07", end: "2027-04-30" },
+  { group: "trapping", icon: "🐾", label: "Otter — South Zone (quota)",  start: "2026-11-07", end: "2027-03-31" },
+  { group: "trapping", icon: "🐾", label: "Beaver — Zone A/B (North)",   start: "2026-11-07", end: "2027-04-30" },
+  { group: "trapping", icon: "🐾", label: "Beaver — Zone C (South)",     start: "2026-11-07", end: "2027-03-31" },
+  { group: "trapping", icon: "🐾", label: "Beaver — Zone D (Mississippi River)", start: "2026-12-07", end: "2027-03-15" },
+  { group: "trapping", icon: "🐾", label: "Mink & Muskrat — Northern Zone", start: "2026-10-24", end: "2027-04-15" },
+  { group: "trapping", icon: "🐾", label: "Mink & Muskrat — Central Zone", start: "2026-10-31", end: "2027-03-22" },
+  { group: "trapping", icon: "🐾", label: "Mink & Muskrat — Southern Zone", start: "2026-11-07", end: "2027-03-15" },
+  { group: "trapping", icon: "🐾", label: "Mink & Muskrat — Mississippi River Zone", start: "2026-11-09", end: "2027-03-07" }
 ];
 
 function seasonDateLabel(iso) {

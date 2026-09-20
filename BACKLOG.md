@@ -782,6 +782,118 @@ throwaway `__debugRefreshHomeHarvests`/`__debugCampStats` hooks to exercise
 the home-harvest renderer and the stats card directly with fixture data; all
 removed after.
 
+### Seasons page — missing migratory game bird seasons filled in — SHIPPED in lite-2.25.1
+
+User caught a real gap by noticing one specific missing season: "september
+first is also the mourning dove season opener, which is very popular but not
+on the calendar. do a thorough look through on the seasons in the calendar
+and make sure we arent missing anything." Re-checked every tab of
+dnr.wisconsin.gov's season-dates page (Deer, Bear, Migratory Birds, Turkey,
+Small Game, Other Game Birds, Furbearers, Falconry — clicked through each,
+since it's a tabbed page and only the active tab's content is in the DOM
+text) against `SEASON_DEFAULTS`, not just the one species the user flagged.
+
+**Found and added** (10 missing seasons, 15 new rows total across two
+existing groups — no new `SEASON_GROUPS` category needed):
+- `smallgame`: Mourning Dove (Sep 1 – Nov 29), Wilson's Snipe (Sep 1 – Nov 9),
+  Rail — Virginia & Sora (Sep 1 – Nov 9), Common Gallinule (Sep 1 – Nov 9),
+  Hungarian Partridge (Oct 17 – Jan 3), Bobwhite Quail (Oct 17 – Dec 9), Crow
+  (Nov 21 – Mar 24) — the first four are DNR's "Migratory Birds" tab, the
+  last three are its "Other Game Birds" tab; this app has always grouped
+  every non-waterfowl bird (including the already-present Woodcock) under
+  one `smallgame` bucket, so these slot in the same way.
+- `waterfowl`: Duck — Open Water Zone (Oct 17 – Dec 15, a THIRD duck zone
+  alongside the already-tracked Northern/Southern — this app was missing it
+  entirely), Coot (mirrors all 4 duck-zone date ranges — Northern, Southern
+  Split 1/2, Open Water — as 4 separate rows, since DNR's own page just says
+  "same as duck season for each zone" and this app already models duck zones
+  as separate rows per zone/split), Goose — Mississippi Zone (Split 1: Oct
+  3–11, Split 2: Oct 17–Jan 5 — a THIRD goose zone alongside Northern/Southern
+  that was also missing entirely).
+- `deer`: **Gun Hunt for Hunters with Disabilities** (Oct 3–11) — distinct
+  from the already-tracked "Youth & Disabled Gun Hunt" (Oct 10–11); DNR lists
+  both as separate 2026 deer seasons. Labeled "(select land only)" since
+  DNR's own page notes it isn't a statewide season.
+
+**Deliberately NOT added, flagged for the user instead of assumed:**
+Furbearer trapping/hunting (coyote, fox, bobcat, raccoon, wolf — DNR's
+"Furbearers" tab) is a genuinely different discipline this app has never
+tracked anywhere (no trapping species in the harvest wizard's `SPECIES` list,
+no license-type distinction) — adding it means a new `SEASON_GROUPS` category
+and a real product decision, not a data-completeness fix, so it wasn't added
+without asking. Falconry (DNR's "Falconry" tab) has its own extended season
+windows for the same species under a separate, much rarer license type —
+skipped as out of scope for a general camp calendar.
+
+Icons kept on every new row for consistency with the existing data shape
+(`icon` is data-only now, feeding the Notifications bell's `seasonIcon`,
+never displayed on the Seasons page itself since lite-2.24.0) — even though
+nothing currently renders them on-screen, every other row has one, so new
+rows match the pattern.
+
+Verified via the usual temporary `window.__debugSetUser`/`__debugEnterApp`
+hooks (removed after): opened the Seasons page, expanded Small Game & Upland
+Birds and Waterfowl, confirmed all new rows render correctly, sort
+chronologically alongside pre-existing rows, and show accurate "open now"
+status against today's real date (Sept 20, 2026) — Mourning Dove correctly
+shows open, Duck zones not yet started correctly show closed.
+
+User also mentioned liking the DNR page's own tabbed/spreadsheet presentation
+style ("i like how the dnr has that tabled and spreadsheeted. might be
+helpful") — noted as a possible future direction for the Seasons page's own
+layout, not acted on this pass since the ask was specifically about missing
+data, not a redesign.
+
+### Trapping added as a new Seasons category — SHIPPED in lite-2.26.0
+
+Direct follow-up to the migratory-bird gap fix above. User: "trapping as a
+season pill button with the trapping season info could be helpful, but
+falconry is unnecessary" — greenlighting one of the two items flagged (and
+not the other) from that prior pass.
+
+New `SEASON_GROUPS.trapping` key (`renderSeasonsScreen` iterates
+`Object.entries(SEASON_GROUPS)` and only renders a group if `SEASON_DEFAULTS`
+has rows for it — confirmed by reading the function before touching it, so
+adding the one new key + its rows was the entire change needed; no rendering
+code touched) — this app's hunting-oriented icon/graphics-removal rules from
+lite-2.23.0/2.24.0 don't really apply here since trapping is a different
+pursuit with its own generic icon (🐾), used the same data-only way as every
+other `icon` field (not displayed on the Seasons page itself, only feeds the
+bell if a trapping season announcement ever fires).
+
+Data sourced from DNR's **dedicated trapping page**
+(dnr.wisconsin.gov/topic/trap/dates — a different, more specific page than
+the general hunt/dates page used for the last two Seasons passes, since
+trapping dates for species like coyote/fox differ from their hunting dates
+despite sharing a species page there). Clicked through all 9 of that page's
+own tabs (Bobcat, Fisher, Otter, Coyote, Fox, Beaver, Mink & Muskrat,
+Raccoon, Other) to be thorough, matching the standard set by the prior pass.
+15 new rows added: Coyote, Fox, Raccoon (all Oct 17 – Feb 15), Fisher
+(permit, Oct 17 – Jan 3), Bobcat (permit, 2 quota periods), Otter (quota, 2
+zones), Beaver (3 zones — North, South, Mississippi River, each with its own
+end date), Mink & Muskrat (4 zones — Northern/Central/Southern/Mississippi
+River, all with different windows).
+
+**Deliberately excluded:** Wolf (no tab on the trapping page at all —
+currently no open season, matching Sharp-tailed grouse's same "No Season
+2026" omission from the earlier pass); the "Other" trapping category
+(opossum, skunk, weasel, porcupine, snowshoe hare, woodchuck — DNR's own
+page says "no season, bag, size, or possession limits," so there's no
+start/end date to put in a `SEASON_DEFAULTS` row); Falconry — explicitly
+declined by the user this time ("falconry is unnecessary").
+
+Raccoon uses the **resident** date range only (Oct 17 – Feb 15); DNR also
+lists a later nonresident start (Oct 31) but this app has never modeled a
+resident/nonresident distinction anywhere else, so adding one just for this
+row would be new, unrequested complexity — flagging here in case it matters
+for a specific member.
+
+Verified via the usual temporary `window.__debugSetUser`/`__debugEnterApp`
+hooks (removed after): Seasons page now shows six pill categories instead of
+five, Trapping expands to all 15 rows sorted chronologically, and — correct
+for today's real date (Sept 20, 2026, well before the Oct 17 opener for most
+of these) — none show "open now" yet.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
