@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.22.1";
+const APP_VERSION = "lite-2.22.2";
 
 
 
@@ -1577,6 +1577,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.22.2", date: "Sep 2026", notes: [
+      "Season categories on the Seasons page are now collapsible"
+    ]},
     { version: "lite-2.22.1", date: "Sep 2026", notes: [
       "Cabin Trophy Room now shows the trophies first — Camp Stats moved to the bottom"
     ]},
@@ -1947,31 +1950,49 @@ function renderSeasonsScreen() {
       ${Object.entries(SEASON_GROUPS).map(([gid, g]) => {
         const list = byGroup[gid] || [];
         if (!list.length) return "";
+        const anyOpen = list.some(s => today >= s.start && today <= s.end);
         return `
-          <div style="font-family:var(--font-serif);font-size:15px;color:var(--gold);margin:16px 0 8px">
-            ${g.icon} ${esc(g.label)}
-          </div>
-          ${list.map(s => {
-            const open = today >= s.start && today <= s.end;
-            return `
-              <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;
-                          background:${open ? "rgba(196,169,106,0.14)" : "var(--forest-card)"};
-                          border:1px solid ${open ? "var(--gold-dim)" : "var(--card-border)"};
-                          border-radius:var(--radius-md)">
-                <span style="font-size:16px;flex-shrink:0">${s.icon}</span>
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;color:var(--text-warm);font-weight:${open ? "600" : "400"}">${esc(s.label)}</div>
-                  <div style="font-size:11px;color:var(--text-dim);margin-top:1px">
-                    ${esc(seasonDateLabel(s.start))} – ${esc(seasonDateLabel(s.end))}
+          <button type="button" onclick="toggleSeasonGroup('${gid}')"
+            style="display:flex;align-items:center;width:100%;background:none;border:none;
+                   cursor:pointer;padding:0;margin:16px 0 8px;font-family:var(--font-sans)">
+            <span style="font-family:var(--font-serif);font-size:15px;color:var(--gold);flex:1;text-align:left">
+              ${g.icon} ${esc(g.label)}${anyOpen ? ` <span style="font-size:10px;color:var(--gold);font-weight:700;
+                text-transform:uppercase;letter-spacing:0.5px;font-family:var(--font-sans)">· open now</span>` : ""}
+            </span>
+            <span id="season-arrow-${gid}" style="color:var(--gold);font-size:16px;transition:transform 0.2s">›</span>
+          </button>
+          <div id="season-group-${gid}">
+            ${list.map(s => {
+              const open = today >= s.start && today <= s.end;
+              return `
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;
+                            background:${open ? "rgba(196,169,106,0.14)" : "var(--forest-card)"};
+                            border:1px solid ${open ? "var(--gold-dim)" : "var(--card-border)"};
+                            border-radius:var(--radius-md)">
+                  <span style="font-size:16px;flex-shrink:0">${s.icon}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;color:var(--text-warm);font-weight:${open ? "600" : "400"}">${esc(s.label)}</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:1px">
+                      ${esc(seasonDateLabel(s.start))} – ${esc(seasonDateLabel(s.end))}
+                    </div>
                   </div>
-                </div>
-                ${open ? `<span style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;
-                            letter-spacing:0.5px;flex-shrink:0">Open now</span>` : ""}
-              </div>`;
-          }).join("")}`;
+                  ${open ? `<span style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;
+                              letter-spacing:0.5px;flex-shrink:0">Open now</span>` : ""}
+                </div>`;
+            }).join("")}
+          </div>`;
       }).join("")}
     </div>`;
 }
+
+window.toggleSeasonGroup = function (gid) {
+  const el    = document.getElementById("season-group-" + gid);
+  const arrow = document.getElementById("season-arrow-" + gid);
+  if (!el) return;
+  const opening = el.classList.contains("hidden");
+  el.classList.toggle("hidden", !opening);
+  if (arrow) arrow.style.transform = opening ? "rotate(90deg)" : "";
+};
 
 // ============================================================
 // CONTESTS — Deer (Big Buck / Big Doe / Bow Buck) + Turkey (Spring / Fall)

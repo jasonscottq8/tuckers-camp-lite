@@ -1,5 +1,5 @@
 // sw.js — Tucker's Camp Lite
-const APP_VERSION = "lite-2.22.1";
+const APP_VERSION = "lite-2.22.2";
 const CACHE_NAME  = `tuckers-camp-lite-${APP_VERSION}`;
 
 const STATIC_ASSETS = [
