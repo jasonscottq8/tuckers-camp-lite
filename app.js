@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.22.2";
+const APP_VERSION = "lite-2.22.3";
 
 
 
@@ -1577,6 +1577,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.22.3", date: "Sep 2026", notes: [
+      "Seasons page category headers now look like actual buttons, not just text"
+    ]},
     { version: "lite-2.22.2", date: "Sep 2026", notes: [
       "Season categories on the Seasons page are now collapsible"
     ]},
@@ -1953,13 +1956,15 @@ function renderSeasonsScreen() {
         const anyOpen = list.some(s => today >= s.start && today <= s.end);
         return `
           <button type="button" onclick="toggleSeasonGroup('${gid}')"
-            style="display:flex;align-items:center;width:100%;background:none;border:none;
-                   cursor:pointer;padding:0;margin:16px 0 8px;font-family:var(--font-sans)">
+            style="display:flex;align-items:center;width:100%;
+                   background:rgba(196,169,106,0.12);border:1px solid var(--gold-dim);
+                   border-radius:var(--radius-xl);cursor:pointer;padding:10px 16px;
+                   margin:16px 0 8px;font-family:var(--font-sans)">
             <span style="font-family:var(--font-serif);font-size:15px;color:var(--gold);flex:1;text-align:left">
               ${g.icon} ${esc(g.label)}${anyOpen ? ` <span style="font-size:10px;color:var(--gold);font-weight:700;
                 text-transform:uppercase;letter-spacing:0.5px;font-family:var(--font-sans)">· open now</span>` : ""}
             </span>
-            <span id="season-arrow-${gid}" style="color:var(--gold);font-size:16px;transition:transform 0.2s">›</span>
+            <span id="season-arrow-${gid}" style="color:var(--gold);font-size:16px;transition:transform 0.2s;flex-shrink:0">›</span>
           </button>
           <div id="season-group-${gid}">
             ${list.map(s => {
