@@ -42,7 +42,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.24.1";
+const APP_VERSION = "lite-2.25.0";
 
 
 
@@ -896,10 +896,11 @@ function renderHomeScreen() {
   document.getElementById("home-hero-wrap").innerHTML = `<div id="home-calendar-wrap"></div>`;
   initHomeCalendar();
 
-  // Check-in button removed 2026 — the calendar's "I'm in for this day" RSVP
-  // covers the same "who's here" job with more detail. renderCheckinButton()
-  // and doCheckin/doCheckout still work if this ever needs to come back.
+  // Check-in button removed 2026 — the calendar's "I'm in" RSVP covers the
+  // same "who's here" job with more detail. renderCheckinButton() and
+  // doCheckin/doCheckout still work if this ever needs to come back.
   loadHomeBulletins();
+  loadHomeHarvests();
 
   document.getElementById("home-grid-wrap").innerHTML = `
     <div class="fade-divider" style="margin:16px 16px;"></div>
@@ -966,7 +967,7 @@ function renderHomeCalendarCard(el) {
       </div>
       <div class="home-cal-chips">
         <span class="weather-pill" id="weather-strip">Loading weather…</span>
-        <span class="weather-pill">${esc(moon.name)}</span>
+        <span class="weather-pill" title="${esc(moon.name)}">${moon.icon} ${esc(moon.name)}</span>
       </div>
       <div class="dow-row">${CAL_DAYS.map(d => `<div>${d[0]}</div>`).join("")}</div>
       <div class="home-cal-grid">${monthGridCellsHTML(year, month, "sm")}</div>
@@ -1574,6 +1575,14 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.25.0", date: "Sep 2026", notes: [
+      "Calendar RSVP button now says \"I'm in\" instead of the old mouthful",
+      "Moon phase icons are back on the calendar",
+      "Calendar visit reasons simplified to three: Hunting/Fishing, Working/Other, Recreation/Other",
+      "Picking \"Overnight\" now starts the day counter at 2 days; any other option skips that screen entirely",
+      "Home screen's Recent Harvests now loads right away instead of waiting on the Harvest Log screen to load first",
+      "Camp Stats now reads as a list of numbers with labels, not sentences, with dividers between each"
+    ]},
     { version: "lite-2.24.1", date: "Sep 2026", notes: [
       "Centered the text on the harvest and calendar wizards' choice buttons — they'd gone lopsided since losing their icons"
     ]},
@@ -3498,6 +3507,19 @@ window.filterHarvests = function (species) {
 };
 
 // ── Home strip ───────────────────────────────────────────────
+// One-shot fetch so the Home screen shows recent harvests right away,
+// instead of waiting on the Harvest Log screen's onSnapshot listener
+// (which only starts once that screen has been opened this session).
+async function loadHomeHarvests() {
+  if (!document.getElementById("recent-harvests-list")) return;
+  try {
+    const q    = query(collection(db, "harvests"), orderBy("harvestDate", "desc"), limit(3));
+    const snap = await getDocs(q);
+    refreshHomeHarvests(snap.docs);
+  } catch (err) {
+    console.error(err);
+  }
+}
 function refreshHomeHarvests(docs) {
   const wrap = document.getElementById("recent-harvests-list");
   if (!wrap) return;
@@ -5440,11 +5462,9 @@ function visitRangeLabel(v) {
 
 // Why someone's at camp — drives the icon on the calendar grid
 const VISIT_PURPOSES = {
-  hunting:  { label: "Hunting",       icon: "🎯", color: "#d4622a" },
-  scouting: { label: "Scouting",      icon: "👀", color: "#6b8f3b" },
-  work:     { label: "Work day",      icon: "🔨", color: "#b28a44" },
-  family:   { label: "Family",        icon: "🏡", color: "#9b7bb0" },
-  visiting: { label: "Just visiting", icon: "👋", color: "#5a8fa8" }
+  hunting:  { label: "Hunting/Fishing",  icon: "🎯", color: "#d4622a" },
+  work:     { label: "Working/Other",    icon: "🔨", color: "#b28a44" },
+  scouting: { label: "Recreation/Other", icon: "👀", color: "#6b8f3b" }
 };
 const DAY_PARTS = {
   morning:   { label: "Morning" },
@@ -5462,14 +5482,14 @@ function moonPhase(date) {
   const now = date.getTime() / 86400000;
   const frac = (((now - knownNew) % SYNODIC) + SYNODIC) % SYNODIC / SYNODIC;
   const table = [
-    { name: "New moon" },
-    { name: "Waxing crescent" },
-    { name: "First quarter" },
-    { name: "Waxing gibbous" },
-    { name: "Full moon" },
-    { name: "Waning gibbous" },
-    { name: "Last quarter" },
-    { name: "Waning crescent" }
+    { name: "New moon",        icon: "🌑" },
+    { name: "Waxing crescent", icon: "🌒" },
+    { name: "First quarter",   icon: "🌓" },
+    { name: "Waxing gibbous",  icon: "🌔" },
+    { name: "Full moon",       icon: "🌕" },
+    { name: "Waning gibbous",  icon: "🌖" },
+    { name: "Last quarter",    icon: "🌗" },
+    { name: "Waning crescent", icon: "🌘" }
   ];
   return table[Math.round(frac * 8) % 8];
 }
@@ -5507,6 +5527,11 @@ function wizardBack(step) {
         style="background:none;border:none;color:var(--text-dim);font-size:12px;
                cursor:pointer;margin-bottom:8px">← Back</button>`
     : "";
+}
+function wizardBackTo(targetStep) {
+  return `<button type="button" onclick="calWizardStep(${targetStep})"
+      style="background:none;border:none;color:var(--text-dim);font-size:12px;
+             cursor:pointer;margin-bottom:8px">← Back</button>`;
 }
 function wizardQuestion(text) {
   return `<div style="font-family:var(--font-serif);font-size:16px;color:var(--text-warm);
@@ -5571,15 +5596,16 @@ function wizardStepHTML(step) {
       </div>
       <button class="btn btn-primary btn-full" onclick="calWizardStep(3)">Continue</button>`;
   }
-  // step 3 — optional notes, then done
+  // step 3 — optional notes, then done. Back skips the day-count screen
+  // (step 2) when it was never shown, i.e. anything but "overnight".
   return `
     ${wizardDots(4, 3)}
-    ${wizardBack(3)}
+    ${wizardBackTo(w.dayPart === "overnight" ? 2 : 1)}
     ${wizardQuestion("Anything to add? (optional)")}
     <input type="text" id="cal-visit-notes" placeholder="Stand, plans, what to bring…" maxlength="140"
       style="width:100%;margin-bottom:16px" />
     <button class="btn btn-primary btn-full" id="cal-wizard-finish" onclick="saveCalendarVisit('${w.dateStr}')">
-      ${w.isPast ? "Log this day" : "I'm in for this day"}
+      ${w.isPast ? "Log this day" : "I'm in"}
     </button>`;
 }
 
@@ -5613,6 +5639,13 @@ window.calWizardStep = function (step) {
 window.calWizardPick = function (field, value) {
   if (!calWizard) return;
   calWizard[field] = value;
+  if (field === "dayPart") {
+    // Overnight implies at least a 2-day stay, so ask; anything else defaults
+    // to a single day and skips the redundant "how many days" screen.
+    calWizard.spanDays = value === "overnight" ? 2 : 1;
+    calWizardStep(value === "overnight" ? 2 : 3);
+    return;
+  }
   calWizardStep(calWizard.step + 1);
 };
 
@@ -5947,7 +5980,7 @@ window.openCalendarDay = function (dateStr) {
               ${esc(rel)}${isWeekend ? " · weekend" : ""}
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-              ${esc(moon.name)}
+              ${moon.icon} ${esc(moon.name)}
             </div>
           </div>
         </div>
@@ -5985,7 +6018,7 @@ window.openCalendarDay = function (dateStr) {
                      style="background:none;border:none;color:var(--gold);font-size:12.5px;font-weight:600;
                             cursor:pointer;display:block;width:100%;text-align:center">+ Log another day for yourself</button>`
                 : `<button class="btn btn-primary btn-full" onclick="calWizardBegin('${dateStr}',${isPast})">
-                     ${isPast ? "Log this day" : "I'm in for this day"} →
+                     ${isPast ? "Log this day" : "I'm in"} →
                    </button>`}
             </div>
             <div id="cal-wizard-wrap" class="hidden">
@@ -6070,7 +6103,7 @@ window.saveCalendarVisit = async function (dateStr) {
     await refreshAllCalendarViews();
   } catch(err) {
     console.error(err);
-    if (btn) { btn.disabled = false; btn.textContent = calWizard?.isPast ? "Log this day" : "I'm in for this day"; }
+    if (btn) { btn.disabled = false; btn.textContent = calWizard?.isPast ? "Log this day" : "I'm in"; }
     showToast("Could not save visit.", "error");
   }
 };
@@ -7038,72 +7071,78 @@ function computeCampStats(cache) {
   };
 }
 
+// A stat row is [label, value] — rendered as "Label" left, bold value right,
+// so the whole card reads as data points, not sentences.
 function campStatsHTML(cs) {
   if (!cs) return "";
   const dateLong = iso => new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const sections = [];
 
-  const totals = [`<strong>${cs.total}</strong> animal${cs.total === 1 ? "" : "s"} taken at camp, all-time — ${cs.speciesLine}`];
-  if (cs.totalWeight > 0) totals.push(`<strong>${Math.round(cs.totalWeight)} lbs</strong> combined, everything ever brought back to camp`);
-  if (cs.totalAntlerScore > 0) totals.push(`<strong>${cs.totalAntlerScore.toFixed(1)}"</strong> of antler, stacked across every buck ever scored`);
-  totals.push(`<strong>${cs.activeMembers}</strong> of ${cs.totalMembers} member${cs.totalMembers === 1 ? "" : "s"} ha${cs.activeMembers === 1 ? "s" : "ve"} put something on the board`);
+  const totals = [["Animals taken at camp, all-time", `${cs.total} — ${esc(cs.speciesLine)}`]];
+  if (cs.totalWeight > 0) totals.push(["Combined weight, all harvests", `${Math.round(cs.totalWeight)} lbs`]);
+  if (cs.totalAntlerScore > 0) totals.push(["Total antler score, all bucks", `${cs.totalAntlerScore.toFixed(1)}"`]);
+  totals.push(["Members with something on the board", `${cs.activeMembers} of ${cs.totalMembers}`]);
   sections.push(["Camp Totals", totals]);
 
   const records = [];
-  if (cs.heaviestBuck) records.push(`Heaviest buck on record: <strong>${esc(cs.heaviestBuck.name)}</strong>, ${cs.heaviestBuck.value} lbs — taken ${esc(cs.heaviestBuck.date)}`);
-  if (cs.widestRack)   records.push(`Widest rack on record: <strong>${esc(cs.widestRack.name)}</strong>, ${cs.widestRack.value}" spread — taken ${esc(cs.widestRack.date)}`);
-  if (cs.heaviestTurkey) records.push(`Heaviest turkey on record: <strong>${esc(cs.heaviestTurkey.name)}</strong>, ${cs.heaviestTurkey.value} lbs — taken ${esc(cs.heaviestTurkey.date)}`);
-  if (cs.heaviestBear)   records.push(`Heaviest bear on record: <strong>${esc(cs.heaviestBear.name)}</strong>, ${cs.heaviestBear.value} lbs — taken ${esc(cs.heaviestBear.date)}`);
-  if (cs.avgBuckLeader)  records.push(`Best average buck score (2+ bucks): <strong>${esc(cs.avgBuckLeader.name)}</strong>, ${cs.avgBuckLeader.avg.toFixed(1)}" B&C average`);
-  if (cs.slamLeader)     records.push(`Camp's most versatile hunter: <strong>${esc(cs.slamLeader.name)}</strong> has taken ${cs.slamLeader.count} of ${cs.slamLeader.of} trackable species`);
-  if (cs.grouseHunter)   records.push(`Most grouse in one season: <strong>${esc(cs.grouseHunter.name)}</strong>, ${cs.grouseHunter.count} in ${cs.grouseHunter.year}`);
-  if (cs.bagLeader)      records.push(`Biggest single-day bag by one hunter: <strong>${esc(cs.bagLeader.name)}</strong>, ${cs.bagLeader.qty} animals on ${esc(cs.bagLeader.date)}`);
+  if (cs.heaviestBuck) records.push(["Heaviest buck on record", `${cs.heaviestBuck.value} lbs (${esc(cs.heaviestBuck.name)}, ${esc(cs.heaviestBuck.date)})`]);
+  if (cs.widestRack)   records.push(["Widest rack on record", `${cs.widestRack.value}" spread (${esc(cs.widestRack.name)}, ${esc(cs.widestRack.date)})`]);
+  if (cs.heaviestTurkey) records.push(["Heaviest turkey on record", `${cs.heaviestTurkey.value} lbs (${esc(cs.heaviestTurkey.name)}, ${esc(cs.heaviestTurkey.date)})`]);
+  if (cs.heaviestBear)   records.push(["Heaviest bear on record", `${cs.heaviestBear.value} lbs (${esc(cs.heaviestBear.name)}, ${esc(cs.heaviestBear.date)})`]);
+  if (cs.avgBuckLeader)  records.push(["Best average buck score (2+ bucks)", `${cs.avgBuckLeader.avg.toFixed(1)}" B&C (${esc(cs.avgBuckLeader.name)})`]);
+  if (cs.slamLeader)     records.push(["Most species taken by one hunter", `${cs.slamLeader.count} of ${cs.slamLeader.of} (${esc(cs.slamLeader.name)})`]);
+  if (cs.grouseHunter)   records.push(["Most grouse in one season", `${cs.grouseHunter.count} (${esc(cs.grouseHunter.name)}, ${cs.grouseHunter.year})`]);
+  if (cs.bagLeader)      records.push(["Biggest single-day bag by one hunter", `${cs.bagLeader.qty} animals (${esc(cs.bagLeader.name)}, ${esc(cs.bagLeader.date)})`]);
   if (records.length) sections.push(["Standing Records", records]);
 
   const doeRecords = [];
-  if (cs.doeDay && cs.doeDay.count > 1) doeRecords.push(`Most does in a single day: <strong>${cs.doeDay.count}</strong>, on ${esc(cs.doeDay.date)}`);
-  if (cs.doeYear && cs.doeYear.count > 1) doeRecords.push(`Most does in a single season, camp-wide: <strong>${cs.doeYear.count}</strong>, in ${cs.doeYear.year}`);
-  if (cs.doeYearHunter) doeRecords.push(`Most does in a season by one hunter: <strong>${esc(cs.doeYearHunter.name)}</strong>, ${cs.doeYearHunter.count} in ${cs.doeYearHunter.year}`);
+  if (cs.doeDay && cs.doeDay.count > 1) doeRecords.push(["Most does in a single day, camp-wide", `${cs.doeDay.count} (${esc(cs.doeDay.date)})`]);
+  if (cs.doeYear && cs.doeYear.count > 1) doeRecords.push(["Most does in a single season, camp-wide", `${cs.doeYear.count} (${cs.doeYear.year})`]);
+  if (cs.doeYearHunter) doeRecords.push(["Most does in a season by one hunter", `${cs.doeYearHunter.count} (${esc(cs.doeYearHunter.name)}, ${cs.doeYearHunter.year})`]);
   if (doeRecords.length) sections.push(["Doe Records", doeRecords]);
 
   const streaks = [];
-  if (cs.streakLeader) streaks.push(`Longest harvest streak: <strong>${esc(cs.streakLeader.name)}</strong>, ${cs.streakLeader.years} years running`);
-  if (cs.dryLeader && cs.dryLeader.days > 30) streaks.push(`Longest current dry spell (one hunter): <strong>${esc(cs.dryLeader.name)}</strong>, ${cs.dryLeader.days} days and counting`);
-  if (cs.campGap && cs.campGap.days > 14) streaks.push(`Camp's longest collective dry spell: <strong>${cs.campGap.days} days</strong>, from ${esc(cs.campGap.from)} to ${esc(cs.campGap.to)}`);
-  if (cs.weekLeader) streaks.push(`Most harvests in a single week: <strong>${esc(cs.weekLeader.name)}</strong>, ${cs.weekLeader.count} in one week`);
-  streaks.push(`First harvest on record: ${esc(cs.first.species)} by <strong>${esc(cs.first.name)}</strong>, ${esc(cs.first.date)}`);
+  if (cs.streakLeader) streaks.push(["Longest harvest streak", `${cs.streakLeader.years} years (${esc(cs.streakLeader.name)})`]);
+  if (cs.dryLeader && cs.dryLeader.days > 30) streaks.push(["Longest current dry spell, one hunter", `${cs.dryLeader.days} days (${esc(cs.dryLeader.name)})`]);
+  if (cs.campGap && cs.campGap.days > 14) streaks.push(["Camp's longest collective dry spell", `${cs.campGap.days} days (${esc(cs.campGap.from)} – ${esc(cs.campGap.to)})`]);
+  if (cs.weekLeader) streaks.push(["Most harvests in a single week", `${cs.weekLeader.count} (${esc(cs.weekLeader.name)})`]);
+  streaks.push(["First harvest on record", `${esc(cs.first.species)} (${esc(cs.first.name)}, ${esc(cs.first.date)})`]);
   sections.push(["Streaks & Timing", streaks]);
 
   const calendar = [];
-  if (cs.busiestDay && cs.busiestDay.count > 1) calendar.push(`Busiest day on record: <strong>${esc(dateLong(cs.busiestDay.date))}</strong> — ${cs.busiestDay.count} animals hit the ground in one day`);
-  if (cs.bestYear && cs.bestYear.count > 1) calendar.push(`Camp's best year: <strong>${cs.bestYear.year}</strong> — ${cs.bestYear.count} harvests logged`);
-  if (cs.bestMonth) calendar.push(`Camp's best month, historically: <strong>${esc(cs.bestMonth.name)}</strong> (${cs.bestMonth.count} harvest${cs.bestMonth.count === 1 ? "" : "s"})`);
-  if (cs.earliestCalDay) calendar.push(`Earliest season-opener on record: <strong>${esc(cs.earliestCalDay.label)}</strong>`);
-  if (cs.latestCalDay && cs.latestCalDay.label !== cs.earliestCalDay?.label) calendar.push(`Latest season-closer on record: <strong>${esc(cs.latestCalDay.label)}</strong>`);
-  if (cs.multiSpeciesDay) calendar.push(`Most different species taken in one day: <strong>${cs.multiSpeciesDay.count}</strong> — ${esc(cs.multiSpeciesDay.species.join(" & "))} on ${esc(cs.multiSpeciesDay.date)}`);
+  if (cs.busiestDay && cs.busiestDay.count > 1) calendar.push(["Busiest day on record", `${cs.busiestDay.count} animals (${esc(dateLong(cs.busiestDay.date))})`]);
+  if (cs.bestYear && cs.bestYear.count > 1) calendar.push(["Camp's best year", `${cs.bestYear.count} harvests (${cs.bestYear.year})`]);
+  if (cs.bestMonth) calendar.push(["Camp's best month, historically", `${esc(cs.bestMonth.name)} (${cs.bestMonth.count})`]);
+  if (cs.earliestCalDay) calendar.push(["Earliest season-opener on record", esc(cs.earliestCalDay.label)]);
+  if (cs.latestCalDay && cs.latestCalDay.label !== cs.earliestCalDay?.label) calendar.push(["Latest season-closer on record", esc(cs.latestCalDay.label)]);
+  if (cs.multiSpeciesDay) calendar.push(["Most species taken in one day", `${cs.multiSpeciesDay.count} (${esc(cs.multiSpeciesDay.species.join(" & "))}, ${esc(cs.multiSpeciesDay.date)})`]);
   if (calendar.length) sections.push(["Calendar", calendar]);
 
   const breakdowns = [];
-  if (cs.gunDeer || cs.bowDeer) breakdowns.push(`${cs.gunDeer} gun deer, ${cs.bowDeer} bow deer taken all-time (bucks and does)`);
-  if (cs.firearmBucks || cs.bowBucks) breakdowns.push(`${cs.firearmBucks} firearm buck${cs.firearmBucks === 1 ? "" : "s"}, ${cs.bowBucks} bow buck${cs.bowBucks === 1 ? "" : "s"} taken all-time`);
-  if (cs.bucksCount || cs.doesCount) breakdowns.push(`${cs.bucksCount} buck${cs.bucksCount === 1 ? "" : "s"} vs. ${cs.doesCount} doe${cs.doesCount === 1 ? "" : "s"} taken all-time`);
+  if (cs.gunDeer || cs.bowDeer) breakdowns.push(["Gun vs. bow deer, all-time", `${cs.gunDeer} gun · ${cs.bowDeer} bow`]);
+  if (cs.firearmBucks || cs.bowBucks) breakdowns.push(["Firearm vs. bow bucks, all-time", `${cs.firearmBucks} firearm · ${cs.bowBucks} bow`]);
+  if (cs.bucksCount || cs.doesCount) breakdowns.push(["Bucks vs. does, all-time", `${cs.bucksCount} bucks · ${cs.doesCount} does`]);
   const { tom, jake, hen } = cs.turkeySexCounts;
-  if (tom || jake || hen) breakdowns.push(`Turkey breakdown: ${tom} tom${tom === 1 ? "" : "s"}, ${jake} jake${jake === 1 ? "" : "s"}, ${hen} hen${hen === 1 ? "" : "s"}`);
-  if (cs.topWaterfowl) breakdowns.push(`Most-bagged waterfowl at camp: <strong>${esc(cs.topWaterfowl.type)}</strong> (${cs.topWaterfowl.count} taken)`);
-  if (cs.topSmallgame) breakdowns.push(`Most-bagged small game at camp: <strong>${esc(cs.topSmallgame.type)}</strong> (${cs.topSmallgame.count} taken)`);
+  if (tom || jake || hen) breakdowns.push(["Turkey breakdown", `${tom} tom · ${jake} jake · ${hen} hen`]);
+  if (cs.topWaterfowl) breakdowns.push(["Most-bagged waterfowl", `${esc(cs.topWaterfowl.type)} (${cs.topWaterfowl.count})`]);
+  if (cs.topSmallgame) breakdowns.push(["Most-bagged small game", `${esc(cs.topSmallgame.type)} (${cs.topSmallgame.count})`]);
   const bearEntries = Object.entries(cs.bearColors);
-  if (bearEntries.length) breakdowns.push(`Bear color phases: ${bearEntries.map(([c, n]) => `${n} ${c}`).join(", ")}`);
+  if (bearEntries.length) breakdowns.push(["Bear color phases", bearEntries.map(([c, n]) => `${n} ${esc(c)}`).join(", ")]);
   if (breakdowns.length) sections.push(["Breakdowns", breakdowns]);
 
   return `
     <div style="background:var(--forest-card);border:1px solid var(--card-border);border-radius:12px;padding:14px 16px;margin-bottom:18px">
       <div style="font-family:var(--font-serif);font-size:15px;color:var(--gold);margin-bottom:6px">Camp Stats</div>
-      ${sections.map(([label, lines]) => `
+      ${sections.map(([label, rows]) => `
         <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.7px;margin:12px 0 4px;
                     border-top:1px solid var(--card-border);padding-top:10px">${esc(label)}</div>
-        ${lines.map((l, i) => `
-          <div style="font-size:13px;color:var(--text-warm);line-height:1.5;padding:6px 0;
-                      ${i < lines.length - 1 ? "border-bottom:1px solid var(--card-border)" : ""}">${l}</div>`).join("")}`).join("")}
+        ${rows.map(([k, v], i) => `
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;
+                      font-size:13px;line-height:1.4;padding:7px 0;
+                      ${i < rows.length - 1 ? "border-bottom:1px solid rgba(196,169,106,0.12)" : ""}">
+            <span style="color:var(--text-muted)">${esc(k)}</span>
+            <span style="color:var(--text-warm);font-weight:600;text-align:right;flex:1 0 auto">${v}</span>
+          </div>`).join("")}`).join("")}
     </div>`;
 }
 

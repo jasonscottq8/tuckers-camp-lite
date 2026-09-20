@@ -708,6 +708,80 @@ confirmed liking the wizard modals' existing dark background against the
 blaze-orange accent buttons elsewhere on screen — noted so a future pass
 doesn't flatten/lighten that contrast.
 
+### Calendar wizard polish + Home harvests bug + Camp Stats reformat — SHIPPED in lite-2.25.0
+
+User's own list, sent as "a couple of things ive been meaning to fix":
+
+1. **Button text.** "I'm in for this day" → **"I'm in"** (user: "that might be
+   the worst sentence choice for this button that ive ever seen"). Both the
+   day-popup entry button and the wizard's finish button, plus the JS error-
+   recovery fallback text, all updated together.
+2. **Moon phase icons restored.** Removed in lite-2.24.0's graphics sweep,
+   user waited to make sure nothing else was competing for visual attention
+   first, then asked for them back: "i kind of liked those." `moonPhase()`'s
+   icon field and both display sites (home calendar chip, day-popup header)
+   restored to exactly their pre-2.24.0 state.
+3. **Visit purposes cut from 5 to 3, relabeled, reordered.** Hunting → "Hunting
+   /Fishing", Scouting → "Recreation/Other", Work day → "Working/Other" (now
+   ordered ABOVE Recreation per the user's ask), Family and Just Visiting
+   removed outright — "those are fairly redundant for a hunting app... 3
+   buttons are enough to describe the majority of actions done at this
+   cabin." `VISIT_PURPOSES` rewritten with only 3 keys; any old `visits` doc
+   with `purpose:"family"` or `"visiting"` now falls back to the roster's "no
+   plan set" bucket (`visitPurpose()` returns null for an unknown key) —
+   graceful degradation, matching this app's usual leave-old-data-alone
+   pattern, not a migration.
+4. **Day-count screen made conditional.** User's reasoning: "if i elect the
+   overnight button, the next screen should automatically start me at 2 days.
+   if i elect any other option, the how many days are you staying becomes
+   redundant." `calWizardPick('dayPart', value)` now branches: `"overnight"`
+   sets `spanDays=2` and advances to the day-count screen (step 2) so the
+   user can still extend further; anything else (morning/evening/all day, or
+   skipping) sets `spanDays=1` and jumps straight to the notes screen (step
+   3), skipping step 2 entirely. Back-navigation from step 3 needed its own
+   fix too — a generic "back = step-1" would land on the now-skipped step 2
+   for non-overnight visits, so added `wizardBackTo(targetStep)` and step 3
+   now backs up to step 2 or step 1 depending on `calWizard.dayPart`.
+5. **Real bug: Home screen's "Recent Harvests" stayed empty until the Harvest
+   Log screen had been opened once.** User: "the recent harvests dont show up
+   until i view all. when i press back, the recent harvests show up." Root
+   cause: `refreshHomeHarvests()` (the function that actually fills
+   `#recent-harvests-list`) was ONLY ever called as a side effect inside
+   `loadHarvestList()`'s `onSnapshot` callback — which only starts once the
+   Harvest Log screen renders. `renderHomeScreen()` itself never fetched
+   anything; the "No recent harvests yet" text was just a hardcoded initial
+   placeholder that happened to look identical to genuinely-empty state, which
+   is why nobody had caught it before. Fixed with a new one-shot
+   `loadHomeHarvests()` (same `getDocs` + `orderBy` + `limit(3)` pattern as
+   the existing `loadHomeBulletins()`), called from `renderHomeScreen()`
+   directly — the Harvest Log screen's live listener still exists and will
+   just refresh the same strip redundantly later, which is harmless.
+6. **Camp Stats reformatted from sentences to data points.** User: "i dont
+   like how the stats read. they seem more like sentences when id like them
+   to be more organized like data points with the number after a :... i just
+   want the statistics to be uniform and not necessarily a story." Every stat
+   in `campStatsHTML()` (Camp Totals, Standing Records, Doe Records, Streaks &
+   Timing, Calendar, Breakdowns) rewritten from a full narrative sentence
+   into a `[label, value]` pair, rendered as a flex row — muted label on the
+   left, bold value right-aligned — instead of one run-on paragraph per stat.
+   The existing per-row bottom border was kept (now a faded
+   `rgba(196,169,106,0.12)` rather than the flatter `--card-border`) as the
+   "little faded dividers between each stat" the user asked for. One rough
+   edge caught in review, not by the user: a long label paired with a long
+   value (e.g. "Animals taken at camp, all-time" + a 3-species breakdown)
+   wraps to two lines under `flex-wrap`, and the value looked left-stuck on
+   its own line instead of staying right-aligned — fixed with `flex:1 0 auto`
+   on the value span so it still claims the remaining row width and
+   right-aligns even when wrapped. User confirmed the layout before that
+   final tweak landed: "that stat layout is much better."
+
+Verified 1–4 and 5's render path (not the live Firestore fetch itself — same
+sandbox-has-no-auth limitation as everywhere else in this project) via the
+usual temporary `window.__debugSetUser`/`__debugEnterApp` hooks, plus new
+throwaway `__debugRefreshHomeHarvests`/`__debugCampStats` hooks to exercise
+the home-harvest renderer and the stats card directly with fixture data; all
+removed after.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,
