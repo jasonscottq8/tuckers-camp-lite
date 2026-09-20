@@ -30,7 +30,9 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
-  deleteField
+  deleteField,
+  terminate,
+  clearIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import {
   ref,
@@ -42,7 +44,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.26.2";
+const APP_VERSION = "lite-2.27.0";
 
 
 
@@ -374,6 +376,42 @@ async function sha256Hex(str) {
 }
 function normalizeCode(c) { return (c || "").trim().toLowerCase().replace(/\s+/g, ""); }
 
+// PBKDF2 for the camp code — the codeHash is a public, unauthenticated read
+// (the sign-up form has to check it before anyone's logged in), so it must
+// assume someone will try to crack it offline. Plain SHA-256 is far too fast
+// for that; PBKDF2 with a high iteration count makes each guess meaningfully
+// expensive without needing a server. `codeSalt` prevents a precomputed
+// rainbow-table attack against any one hash.
+const CAMP_CODE_PBKDF2_ITERATIONS = 210000;
+function bytesToHex(bytes) { return [...bytes].map(b => b.toString(16).padStart(2, "0")).join(""); }
+function hexToBytes(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+}
+function randomSaltHex(len = 16) { return bytesToHex(crypto.getRandomValues(new Uint8Array(len))); }
+async function pbkdf2Hex(str, saltHex, iterations) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(str), "PBKDF2", false, ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: hexToBytes(saltHex), iterations, hash: "SHA-256" },
+    keyMaterial, 256
+  );
+  return bytesToHex(new Uint8Array(bits));
+}
+// Old camp codes were hashed with plain sha256Hex (no salt) — codeSalt only
+// exists on codes set after this upgrade. Verify against whichever scheme
+// the stored config actually used, so an old unrotated code doesn't just
+// stop working; a freshly-set code always gets the stronger PBKDF2 form.
+async function verifyCampCode(rawCode, cfg) {
+  const norm = normalizeCode(rawCode);
+  if (cfg.codeSalt) {
+    return (await pbkdf2Hex(norm, cfg.codeSalt, cfg.codeIterations || CAMP_CODE_PBKDF2_ITERATIONS)) === cfg.codeHash;
+  }
+  return (await sha256Hex(norm)) === cfg.codeHash;
+}
+
 window.doLogin = async function () {
   const email    = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
@@ -430,7 +468,7 @@ window.doSignup = async function () {
       refreshSignupAvailability();
       return;
     }
-    if (await sha256Hex(normalizeCode(code)) !== cfg.codeHash) {
+    if (!(await verifyCampCode(code, cfg))) {
       showToast("That camp code isn't right.", "error");
       return;
     }
@@ -467,7 +505,20 @@ window.doLogout = function () {
   appConfirm("Sign Out", "Sign out of Tucker's Camp?", async () => {
     closeDrawer();
     try { await signOut(auth); } catch (_) {}
-    // onAuthStateChanged calls showLoginScreen
+    // Wipe the on-device Firestore cache so camp data (harvests, feed, member
+    // names, calendar) isn't sitting in this browser's IndexedDB, readable by
+    // devtools, for anyone who later opens the same profile on a shared or
+    // borrowed device. Requires terminating the Firestore instance first, so
+    // reload right after — the next page load re-initializes it fresh from
+    // firebase.js, landing back on the (now signed-out) login screen.
+    try {
+      await terminate(db);
+      await clearIndexedDbPersistence(db);
+    } catch (_) {
+      // best-effort — e.g. persistence was never enabled, or another tab
+      // still has the DB open. Sign-out itself already succeeded above.
+    }
+    window.location.reload();
   });
 };
 
@@ -1575,6 +1626,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.27.0", date: "Sep 2026", notes: [
+      "Security pass: photos can no longer be overwritten by anyone but their uploader, the camp sign-up code is now far harder to crack, and signing out clears cached camp data from this device"
+    ]},
     { version: "lite-2.26.2", date: "Sep 2026", notes: [
       "Fixed: Home screen's Recent Harvests was still showing empty even with harvests logged — it was checking for a piece of the page that didn't exist yet"
     ]},
@@ -3028,11 +3082,13 @@ window.adminSetCampCode = function () {
       <div class="modal-title">🎟️ Camp code</div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5">
         Members type this when creating an account. Not case-sensitive, spaces
-        ignored. Setting a new code opens sign-ups.
+        ignored. Setting a new code opens sign-ups. This is checked before
+        anyone signs in, so avoid a real word or short phrase — a longer,
+        made-up string (like a random word mashup) is much harder to guess.
       </div>
       <div class="input-group" style="margin-bottom:16px">
         <label>New code</label>
-        <input type="text" id="campcode-input" placeholder="e.g. BuckSeason26" autocapitalize="none" autocomplete="off" />
+        <input type="text" id="campcode-input" placeholder="e.g. Antler-Crick-4817" autocapitalize="none" autocomplete="off" />
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('campcode-overlay').remove()">Cancel</button>
@@ -3046,9 +3102,12 @@ window.submitCampCode = async function () {
   const norm = normalizeCode(document.getElementById("campcode-input")?.value || "");
   if (norm.length < 4) { showToast("Use at least 4 characters.", "error"); return; }
   try {
-    const codeHash = await sha256Hex(norm);
+    const codeSalt = randomSaltHex();
+    const codeHash = await pbkdf2Hex(norm, codeSalt, CAMP_CODE_PBKDF2_ITERATIONS);
     await setDoc(doc(db, "config", "signup"), {
       codeHash,
+      codeSalt,
+      codeIterations: CAMP_CODE_PBKDF2_ITERATIONS,
       open:          true,
       updatedAt:     serverTimestamp(),
       updatedByName: userProfile.displayName

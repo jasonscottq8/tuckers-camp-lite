@@ -31,6 +31,97 @@ The next deep pass should be dedicated to these two themes, not features.
   edit/delete someone else's individual comment via a raw Firestore call. Fully
   closing that needs the comments subcollection refactor (post-stress-test
   item #1) — this pass is a strong mitigation, not the complete fix.
+- **2026-09-20 security audit — 3 more real gaps found and fixed (lite-2.27.0),
+  1 confirmed and deliberately deferred.** User asked directly for a
+  best-effort security pass ("i would like for the app to be genuinely safe...
+  from people who have nothing better to do than try to peek their heads
+  in"). Read `firestore.rules`, `storage.rules`, `firebase.js`, and every
+  auth/admin code path fresh rather than trusting this file's own prior
+  entries, since those could be stale.
+  1. **Storage: any signed-in member could silently overwrite another
+     member's already-uploaded photo — fixed.** `storage.rules`'s top-level
+     `{allPaths=**}` rule used a blanket `allow write`, which in Storage
+     rules covers create AND update/overwrite (only `delete` had a separate,
+     ownership-checked rule). Since every photo URL in the app is just its
+     own storage path in plain sight, anyone signed in could target an
+     existing harvest/trail-cam/feed photo's exact path and replace its
+     bytes with something else, with no error and no trace beyond the
+     Storage object's own last-modified time. Split the top-level rule into
+     `allow create` (open to any signed-in member, unchanged) and moved
+     `update` into the same per-folder blocks that already gated `delete`
+     (`ownsFile()` — matches the uploader's uid prefix — or admin). Verified
+     the new rules file compiles via `firebase deploy --only storage
+     --dry-run`.
+  2. **Sign-up camp code: crackable offline, no rate limit possible —
+     mitigated.** `config/signup`'s `codeHash` is a public, *unauthenticated*
+     Firestore read (it has to be, since the sign-up form checks it before
+     anyone's logged in) and was plain unsalted SHA-256 — fast enough that
+     anyone could download that one document and brute-force it completely
+     offline, with zero interaction with the live app, no request throttling
+     possible against an attack that never touches your servers. If the real
+     camp code is anything memorable, this is realistically crackable in
+     well under an hour on ordinary hardware. Switched to salted PBKDF2-
+     HMAC-SHA256 at 210,000 iterations (`pbkdf2Hex`/`randomSaltHex` in
+     app.js) — measured at ~116ms per guess in a Node fixture vs. ~0ms for
+     plain SHA-256, a roughly 100,000x cost increase per candidate for an
+     offline attacker. `submitCampCode` now writes `{codeHash, codeSalt,
+     codeIterations}`; `verifyCampCode()` checks for `codeSalt` and falls
+     back to the old plain-SHA256 comparison when it's absent, so the
+     *currently live* camp code hash (set before this fix, still in the old
+     format) keeps working exactly as before and nobody gets locked out —
+     but it only gets the new, much stronger hash once an admin re-sets the
+     code via Admin → Sign-ups (even re-entering the same code text is
+     enough to trigger the rehash). **Action needed: re-set the camp code
+     once after this deploys to actually get the benefit; the admin
+     "Set/Change code" dialog's helper text was also updated to recommend a
+     long made-up string over a real word or short phrase, since a strong
+     hash still won't save a weak, guessable code.** Verified via a
+     standalone Node fixture (8 assertions: correct/wrong code against both
+     the new salted format and the legacy fallback, salt uniqueness, hash
+     determinism, and the timing difference) — `scratchpad/test_pbkdf2.mjs`,
+     not committed.
+  3. **Hosting: no clickjacking/MIME-sniffing protection — added.**
+     `firebase.json` had zero security headers. Added a `"source": "**"`
+     header block: `X-Frame-Options: DENY` + `Content-Security-Policy:
+     frame-ancestors 'none'` (stops the site being iframed on another page to
+     trick a logged-in member into clicking a hidden real button —
+     clickjacking), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+     strict-origin-when-cross-origin`. Deliberately did NOT add a
+     script-blocking CSP (`script-src`) — this entire app is built on inline
+     `onclick="..."` handlers throughout every screen, and a CSP strict
+     enough to meaningfully block injected scripts would break the app's own
+     UI wholesale; that would need a real architecture change (moving off
+     inline handlers), not a config tweak.
+  4. **Lower priority, fixed anyway since asked for "everything": signing out
+     left cached camp data (harvests, feed, member names) sitting in this
+     browser's on-device Firestore cache (IndexedDB), inspectable via
+     devtools by anyone with later access to that same browser profile —
+     e.g. a shared or borrowed device.** `doLogout` now calls
+     `terminate(db)` + `clearIndexedDbPersistence(db)` (both newly imported
+     from the firestore SDK) right after `signOut()`, wrapped in a
+     best-effort `try/catch` (this can fail harmlessly if another tab of the
+     app still has the database open — the `persistentMultipleTabManager`
+     setup means tabs share one on-device cache — sign-out itself always
+     still succeeds either way), then forces `window.location.reload()`
+     since `db` is unusable once terminated and the whole app assumes it
+     works everywhere; the reload re-initializes Firestore fresh from
+     `firebase.js` and lands back on the login screen. Verified in-browser:
+     confirm dialog appears, confirming it triggers a real page navigation
+     (proving the flow ran to completion) with no new console errors beyond
+     the sandbox's usual permission-denied noise, and the app boots cleanly
+     back to the login shell after.
+  **Deliberately NOT touched this pass:** the comments-array impersonation/
+  tampering gap (the *remaining gap* noted above, from lite-2.16.0) — user
+  explicitly said to defer it ("fix everything except 3, we will do that
+  later"). Also not touched: nothing stops a member from setting their own
+  display name to exactly match another member's (or "Admin") to impersonate
+  them socially in the feed/comments — flagged during the audit, but there's
+  no clean technical fix available without either weakening the `users` read
+  rule to public (bad — exposes the full member list to anyone unauthenticated)
+  or adding a Cloud Function (bigger infra than this static, backend-less app
+  currently has); accepted as a soft, social-engineering-only risk rather than
+  a technical access-control bypass, same category as almost any app that
+  lets people pick their own display name.
 - **Stats-corrupting multi-user bugs — DONE (lite-2.16.0).** Found in the same
   audit: (a) `saveHarvest` on edit reassigned `uid`/`memberName`/avatar to
   whoever clicked Save — so an admin editing another member's harvest silently

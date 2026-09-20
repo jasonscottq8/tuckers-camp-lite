@@ -17,22 +17,32 @@ service firebase.storage {
       return signedIn() && name.matches(request.auth.uid + '_.*');
     }
 
-    // Read/upload — any signed-in member, image files under 25 MB.
-    match /{allPaths=**} {
-      allow read: if signedIn();
-      allow write: if signedIn()
-                   && request.resource.size < 25 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+    function validImage() {
+      return request.resource.size < 25 * 1024 * 1024
+             && request.resource.contentType.matches('image/.*');
     }
 
-    // Delete — only the uploader (by filename prefix) or an admin.
+    // Read/create — any signed-in member, image files under 25 MB. New files
+    // only: this does NOT cover overwriting a path that already has a file —
+    // see the per-folder rules below, which require the uploader (or admin)
+    // for that. Without this split, anyone signed in could silently replace
+    // another member's already-uploaded photo at its known filename.
+    match /{allPaths=**} {
+      allow read:   if signedIn();
+      allow create: if signedIn() && validImage();
+    }
+
+    // Update (overwrite) and delete — only the uploader (by filename prefix) or an admin.
     match /feed/{file} {
+      allow update: if (ownsFile(file) || isAdmin()) && validImage();
       allow delete: if ownsFile(file) || isAdmin();
     }
     match /harvests/{date}/{file} {
+      allow update: if (ownsFile(file) || isAdmin()) && validImage();
       allow delete: if ownsFile(file) || isAdmin();
     }
     match /trailcam/{date}/{file} {
+      allow update: if (ownsFile(file) || isAdmin()) && validImage();
       allow delete: if ownsFile(file) || isAdmin();
     }
   }
