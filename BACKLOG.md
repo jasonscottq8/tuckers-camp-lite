@@ -1191,6 +1191,55 @@ moving real data) is unverified — same sandbox-has-no-auth ceiling as every
 other write path in this project — so budget a careful first run and a
 look at the admin log afterward once this is live.
 
+### By-Laws page filled in — SHIPPED in lite-2.29.0
+
+The By-Laws screen had been a placeholder ("By-Laws text will be added here")
+since the drawer nav item was added. User supplied the real document —
+`Bylaws/Bylaws_Rev_ 2026-01-15.pdf` in the project folder, "Tucker's Camp,
+Inc Bylaws," 5 pages: a Definitions block plus Articles I–VII (Membership;
+Hunting, Fishing, Recreation and Use; Improvements; Committees; Finances;
+Future Properties; Bylaws itself). Read the PDF directly, transcribed it
+verbatim into `BYLAWS_SECTIONS` (a plain data array, same shape as
+`SEASON_DEFAULTS`), and rewrote `renderBylawsScreen()` to render it using
+the **exact same collapsible-category pattern already shipped for the
+Seasons page** (`renderSeasonsScreen`/`toggleSeasonGroup`, lite-2.22.x) —
+same blaze-orange gradient header buttons, same rotating ▾ arrow, same
+"collapsed by default" convention — copied deliberately rather than
+inventing a new pattern, so a member who's already used Seasons already
+knows how this screen works. New `window.toggleBylawsSection(id)` mirrors
+`toggleSeasonGroup` exactly.
+
+Chose to render the bylaws as **native in-app text, not an embedded or
+linked PDF** — a legal document read on a phone should be real selectable
+text with proper line-wrapping, not a zoomed-in PDF viewport; matches how
+every other content-heavy screen in this app already works. One structural
+wrinkle handled: Article IV, Section 1 has a lettered sub-list (a–f, the
+standing committees) with prose that continues *after* the sub-list ("The
+President shall appoint...") — `BYLAWS_SECTIONS` items are normally plain
+strings, but this one is `{text, sub: [...], after}`, and the render
+function branches on `typeof item === "string"` to handle both shapes in
+the same `<ol>`. Definitions render as a separate `term`/`text` layout
+(bold gold term, plain definition beneath) rather than the numbered-clause
+style, matching how the source PDF itself visually distinguishes them.
+
+`BYLAWS_REV` (`"January 15, 2026"`) is shown at the top of the screen and
+comes from the PDF's own "Rev:" footer line — a code comment on
+`BYLAWS_SECTIONS` flags that per the bylaws' own Article VII, a change to
+this list should only ever reflect an actual new signed revision (75%, or
+unanimous for two specific sections, membership vote), never a casual edit,
+same spirit as the "don't touch historical changelog entries" rule
+elsewhere in this file's conventions.
+
+Verified via the usual temporary `window.__debugSetUser`/`__debugEnterApp`
+hooks (removed after): all 8 sections (Definitions + 7 Articles) render
+collapsed, expand/collapse correctly with the arrow rotating, Definitions'
+term/text pairs and Article IV's lettered sub-list plus trailing prose all
+render in the right order and structure. Not touched: the original PDF
+file itself isn't bundled as a downloadable asset in the deployed app —
+only its transcribed text lives in the app now. Offer to also host the
+source PDF as a "download the original document" link if the user wants
+that belt-and-suspenders option later.
+
 ## Also noted (minor, no rush)
 
 - Kill points use read-modify-write on the user doc (`recordKill`,

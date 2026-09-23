@@ -45,7 +45,7 @@ import {
 // ============================================================
 // APP VERSION
 // ============================================================
-const APP_VERSION = "lite-2.28.0";
+const APP_VERSION = "lite-2.29.0";
 
 
 
@@ -1627,6 +1627,9 @@ function renderUpdatesScreen() {
   const el = document.getElementById("updates-content");
   if (!el) return;
   const changelog = [
+    { version: "lite-2.29.0", date: "Sep 2026", notes: [
+      "By-Laws page now has the actual bylaws — every Article, collapsible like the Seasons page"
+    ]},
     { version: "lite-2.28.0", date: "Sep 2026", notes: [
       "Comments on harvests, trail cam photos, and feed posts now use a safer storage format under the hood — closes a gap where a member could have tampered with someone else's replies",
       "Admins: a one-time \"Migrate Comments\" button in the admin panel moves existing comments to the new format"
@@ -1953,18 +1956,123 @@ window.toggleChangelog = function (i) {
 // ============================================================
 // BY-LAWS & CONTESTS — Updated
 // ============================================================
+// Sourced verbatim from "Tucker's Camp, Inc Bylaws" (Bylaws_Rev_2026-01-15.pdf).
+// Per Article VII, a bylaw only changes with a 75% (or, for two specific
+// sections, unanimous) vote of the Memberships — this list should only ever
+// be updated to match a NEW signed revision of that document, never edited
+// casually. Update BYLAWS_REV to match the new PDF's own "Rev:" line.
+const BYLAWS_REV = "January 15, 2026";
+const BYLAWS_SECTIONS = [
+  { id: "definitions", label: "Definitions", kind: "definitions", items: [
+    { term: "Stock", text: "Tucker's Camp, Inc. stock is sold only in Blocks of 100 Shares. The term used for a Block of 100 Shares shall be “Membership.”" },
+    { term: "Membership", text: "A Block of 100 Shares of Tucker's Camp Inc. stock." },
+    { term: "Stockholder", text: "An individual or joint owner of a Membership." },
+    { term: "Member", text: "An individual or joint owner of a Membership." },
+    { term: "Board of Directors", text: "Each Member shall be a member of the Board of Directors and entitled to voting privileges, other than as noted in the Stock Restriction Agreement, Section 5." }
+  ]},
+  { id: "article-1", label: "Article I — Membership", items: [
+    "It is the intention of the Members to restrict the transfer of the Memberships/Stock of Tucker's Camp, Inc. These restrictions shall be found in the Tucker's Camp, Inc. Stock Restriction Agreement.",
+    "The Annual Meeting and election of officers will normally be conducted on Friday evening of Deer Season (the day after Thanksgiving Day). Members will be notified of meetings of the Board of Directors by the Secretary at least two weeks prior to the meeting. Meetings will normally be conducted at Tucker's Camp cabin unless specified otherwise.",
+    "All motions voted on shall pass by a simple majority of the entire number of Memberships unless otherwise noted in these Bylaws or the Stock Restriction Agreement. To further clarify; a vote shall always pass or fail based on a percentage of the total number of Memberships regardless of how many Memberships are represented at the time of the vote.",
+    "Members shall determine the value of a Membership each year at the annual meeting. If a majority of Members cannot agree on the value of a Membership, a Membership will remain at the current value until the next annual meeting.",
+    "Tucker's Camp, Inc may revoke a Membership by approval of at least 75% of the Memberships. Revocation of Membership privileges will be immediate upon the vote. The repurchase of a Membership by revocation is outlined in the Stock Restriction Agreement, Section 12."
+  ]},
+  { id: "article-2", label: "Article II — Hunting, Fishing, Recreation and Use", items: [
+    "Tucker's Camp Inc. has been established to further Members enjoyment of our natural resources, and especially for the purposes of hunting and fishing. Regulations shall be made from time to time that will regulate who hunts or fishes, how Members or guests hunt or fish, what game or fish are pursued, and when Members or guests may hunt or fish. These regulations are not intended to replace local, state, or federal hunting and fishing regulations, but to further regulate. Members and guests of Tucker's Camp Inc shall always comply with all local, state, and federal hunting and fishing regulations.",
+    "Any regulations or recommendations established by Tucker's Camp Inc shall be recorded in a Log of Hunting and Fishing Regulations. This log will be maintained by the Chairman of the Wildlife Management Committee and will be posted in the Tucker's Camp cabin. They will also be noted in the minutes of the meeting in which they were passed. Regulations or recommendations may be proposed by the Wildlife Management Committee or any Member at any meeting of the Board of Directors.",
+    "For the duration of each hunting or fishing season, a Member may only allow one guest on the premise at a time. Any guest must be accompanied by a Member. In the case of a joint Membership, if both Members are hunting or fishing at the same time, they may not have a guest.",
+    "Each Member shall be entitled to a total harvest of the daily or season bag limit of game or fish for each season for himself plus another legal limit for a guest, or for both Members of a joint Membership.",
+    "Use of the property and buildings shall be at the discretion of the Members. Buildings are open to all Members; however, it is not intended that the cabin become the permanent or seasonal dwelling of any one or more Members. Extended use that may cause inconvenience to other Members will not be condoned.",
+    "Use of the property and buildings by families and friends of Members who are accompanied by the Member(s) is encouraged with the exceptions noted in Article II, Sections 3 and 5."
+  ]},
+  { id: "article-3", label: "Article III — Improvements", items: [
+    "From time to time, improvements may be made to the property, roads, buildings, machinery, etc. that may require labor and/or expense. Members shall be requested to provide labor and/or authorize funds to accomplish such projects.",
+    "Expenditures of less than $500 may be approved by two of the current officers. Expenditures of over $500 shall require approval of the Membership."
+  ]},
+  { id: "article-4", label: "Article IV — Committees", items: [
+    { text: "Tucker's Camp Inc. shall have the following standing committees:",
+      sub: ["Timber Management and Harvest", "Buildings, Grounds and Deer Stands", "Wildlife Management", "Roads and Fences", "Membership", "Finance"],
+      after: "The President shall appoint at least two persons to each committee and said committee may make recommendations, propose rule changes to be approved by the Membership or work projects to be completed by the Members, except for the Finance committee." },
+    "Members of the Finance Committee shall be the elected officers; President, Secretary and Treasurer. The Secretary shall chair the Finance Committee.",
+    "Other committees may be formed or dissolved by the President, or through the President at the request of Members.",
+    "Committee chairmen will report to the Membership at each meeting of the Board of Directors, and by email if time is of the essence.",
+    "Committees will only perform tasks that relate to Tucker's Camp, Inc., for the benefit of the Tucker's Camp, Inc. and/or its Members.",
+    "The President is authorized to enter into and manage agreements or contracts on behalf of Tucker's Camp, Inc with prior approval of at least 75% of the Memberships. Renewal, extension or modification of the terms of such agreements or contracts shall require the approval of at least 75% of the Memberships."
+  ]},
+  { id: "article-5", label: "Article V — Finances", items: [
+    "Tucker's Camp, Inc. will have ongoing expenses, specifically property taxes and any other miscellaneous costs that come before the Treasurer. The Treasurer and/or Secretary are hereby authorized to levy a fee as they/he see(s) fit to cover expenses. Such fee shall be due 10 days after request.",
+    "To temporarily fund the repurchase of Membership(s) or to purchase land, The Finance committee may maintain a line of credit at a financial institution, of up to twice the value of a Membership. Collateral shall be a parcel or parcels of land owned by Tucker's Camp, Inc. Which parcel or parcels will be used as collateral shall be chosen by a vote of the Membership.",
+    "The Finance Committee shall manage any line of credit, Membership repurchases, and land purchases as set forth in these Bylaws and the Stock Restriction Agreement.",
+    "The signatures of both the President and Treasurer shall be required to create a line of credit and to withdraw funds from the line of credit. Funds may only be withdrawn against the line of credit for the purposes of repurchasing Membership(s) or to purchase land.",
+    "Tucker's Camp, Inc. shall be liable for the repayment of loans against the line of credit. Each remaining Membership will be assessed an equal amount of the line of credit loan."
+  ]},
+  { id: "article-6", label: "Article VI — Future Properties", items: [
+    "When additional properties are made available to Tucker's Camp Inc., current Members will be contacted first to purchase these properties by extending our mutual financial commitment. This decision must be unanimous so as not to put undue financial burden on any one Member. If monies cannot be raised within the Membership, then a vote will be taken to invite additional investor(s) to purchase new Membership(s) at the value determined at the most recent annual meeting plus the value of the property to be purchased divided by the total number of current Memberships plus new Membership(s). This decision to expand the membership by selling an additional Membership(s) will require a 75% majority of the current Memberships. In addition, an interested person will require a vote passed by a 75% majority of current Memberships to be offered membership."
+  ]},
+  { id: "article-7", label: "Article VII — Bylaws", items: [
+    "Unless noted otherwise, a bylaw may not be changed, added, or deleted unless it has the approval of at least 75% of the Memberships. This is further defined as not just 75% of those Members present at any given meeting but at least 75% of all Memberships.",
+    "The Bylaws Article I, Section 2 and Article VI, Section 1 may only be changed by a unanimous vote of all Memberships.",
+    "These Bylaws replace all previous versions of this document.",
+    "If any section of these bylaws is deemed unlawful by local, state, or federal statute, the balance of these bylaws shall remain in force."
+  ]}
+];
+
 function renderBylawsScreen() {
   const el = document.getElementById("bylaws-content");
   if (!el) return;
   el.innerHTML = `
-    <div style="padding:16px">
-      <div class="card">
-        <div style="color:var(--text-muted);font-size:13px;line-height:1.6;font-style:italic">
-          By-Laws text will be added here. Contact an admin to submit the official club articles.
-        </div>
+    <div style="padding:14px 16px 40px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">
+        The official articles of Tucker's Camp, Inc. &middot; Rev: ${esc(BYLAWS_REV)}
       </div>
+      ${BYLAWS_SECTIONS.map(sec => `
+        <button type="button" onclick="toggleBylawsSection('${sec.id}')"
+          style="display:flex;align-items:center;width:100%;
+                 background:linear-gradient(135deg, var(--orange), var(--orange-bright));
+                 border:none;border-radius:var(--radius-lg);cursor:pointer;padding:14px 16px;
+                 margin:10px 0 0;font-family:var(--font-sans)">
+          <span style="font-size:15px;color:#fff;font-weight:700;flex:1;text-align:left">${esc(sec.label)}</span>
+          <span id="bylaws-arrow-${sec.id}" style="color:#fff;font-size:14px;transition:transform 0.2s;flex-shrink:0">▾</span>
+        </button>
+        <div id="bylaws-group-${sec.id}" class="hidden">
+          <div style="padding:14px 16px">
+            ${sec.kind === "definitions" ? `
+              <div style="display:flex;flex-direction:column;gap:14px">
+                ${sec.items.map(d => `
+                  <div>
+                    <div style="font-size:13px;font-weight:700;color:var(--gold);margin-bottom:3px">${esc(d.term)}</div>
+                    <div style="font-size:13px;color:var(--text-warm);line-height:1.55">${esc(d.text)}</div>
+                  </div>`).join("")}
+              </div>
+            ` : `
+              <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:14px">
+                ${sec.items.map(item => {
+                  if (typeof item === "string") {
+                    return `<li style="font-size:13px;color:var(--text-warm);line-height:1.55">${esc(item)}</li>`;
+                  }
+                  return `<li style="font-size:13px;color:var(--text-warm);line-height:1.55">
+                    ${esc(item.text)}
+                    <ol type="a" style="margin:8px 0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
+                      ${item.sub.map(s => `<li style="font-size:13px;color:var(--text-warm)">${esc(s)}</li>`).join("")}
+                    </ol>
+                    ${item.after ? esc(item.after) : ""}
+                  </li>`;
+                }).join("")}
+              </ol>
+            `}
+          </div>
+        </div>`).join("")}
     </div>`;
 }
+
+window.toggleBylawsSection = function (id) {
+  const el    = document.getElementById("bylaws-group-" + id);
+  const arrow = document.getElementById("bylaws-arrow-" + id);
+  if (!el) return;
+  const opening = el.classList.contains("hidden");
+  el.classList.toggle("hidden", !opening);
+  if (arrow) arrow.style.transform = opening ? "rotate(180deg)" : "";
+};
 
 // ============================================================
 // SEASONS — Wisconsin DNR dates for the current license year.

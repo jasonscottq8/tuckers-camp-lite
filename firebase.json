@@ -17,7 +17,8 @@
       "cors.json",
       "firestore.rules",
       "storage.rules",
-      "firestore.indexes.json"
+      "firestore.indexes.json",
+      "Bylaws/**"
     ],
     "headers": [
       {
